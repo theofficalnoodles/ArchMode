@@ -1,0 +1,25 @@
+# Logs
+*.log
+/logs/
+
+# Config
+config/
+. env
+.env.local
+
+# Build
+*. tar.gz
+*.pkg.tar.zst
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*. swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
