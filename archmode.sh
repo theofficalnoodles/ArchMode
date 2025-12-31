@@ -1,8 +1,3 @@
-# Complete Updated ArchMode with New Features + AUR Guide
-
-## 1. Complete `archmode.sh` with New Features
-
-```bash
 #!/bin/bash
 
 # ArchMode - System Mode Manager for Arch Linux
@@ -301,7 +296,7 @@ tweak_irqbalance() {
 show_status() {
     echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║          ArchMode Status               ║"
+    echo "║           ArchMode Status              ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
@@ -338,7 +333,7 @@ show_status() {
 list_modes() {
     echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║        Available Modes                 ║"
+    echo "║         Available Modes                ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
@@ -355,7 +350,7 @@ list_modes() {
 list_tweaks() {
     echo -e "${MAGENTA}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║       Available Tweaks                 ║"
+    echo "║        Available Tweaks                ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
@@ -372,7 +367,7 @@ list_tweaks() {
 show_version() {
     echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║            ArchMode v$VERSION            ║"
+    echo "║             ArchMode v$VERSION           ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
@@ -384,7 +379,7 @@ show_version() {
 reset_all() {
     echo -e "${YELLOW}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║         Resetting Everything           ║"
+    echo "║          Resetting Everything          ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
@@ -413,7 +408,7 @@ reset_all() {
 update_archmode() {
     echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║        ArchMode Update Utility         ║"
+    echo "║         ArchMode Update Utility        ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
@@ -503,8 +498,8 @@ interactive_mode() {
         clear
         echo -e "${CYAN}${BOLD}"
         echo "╔════════════════════════════════════════╗"
-        echo "║           ArchMode Manager             ║"
-        echo "║              v$VERSION                   ║"
+        echo "║            ArchMode Manager            ║"
+        echo "║               v$VERSION                  ║"
         echo "╚════════════════════════════════════════╝"
         echo -e "${NC}"
         echo ""
@@ -712,3 +707,27 @@ case "${1:-}" in
         
     reset)
         reset_all
+        ;;
+        
+    update)
+        update_archmode
+        ;;
+
+    version)
+        show_version
+        ;;
+
+    help|--help|-h)
+        show_help
+        ;;
+
+    "")
+        interactive_mode
+        ;;
+
+    *)
+        echo -e "${RED}Unknown command: ${1:-}${NC}"
+        show_help
+        exit 1
+        ;;
+esac
