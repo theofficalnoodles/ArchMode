@@ -20,15 +20,6 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Default modes configuration
-DEFAULT_MODES=(
-    "GAMEMODE: Gaming Mode: false"
-    "PRODUCTIVITY:Productivity Mode:false"
-    "POWERMODE:Power Save Mode:false"
-    "QUIETMODE:Quiet Mode (Low Fan):false"
-    "DEVMODE:Development Mode:false"
-)
-
 ###############################################################################
 # Logging Functions
 ###############################################################################
@@ -37,6 +28,7 @@ log_msg() {
     local level="$1"
     local msg="$2"
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    mkdir -p "$(dirname "$LOG_FILE")"
     echo "[$timestamp] [$level] $msg" >> "$LOG_FILE"
 }
 
@@ -70,22 +62,13 @@ init_config() {
     if [[ ! -f "$CONFIG_FILE" ]]; then
         cat > "$CONFIG_FILE" << 'EOF'
 # ArchMode Configuration File
-# Format: MODE_NAME:Display Name:Default State (true/false)
+# Format: MODE_NAME|Display Name|Default State (true/false)
 
-# Gaming Mode - Disables notifications, optimizes CPU governor
-GAMEMODE:Gaming Mode: false
-
-# Productivity Mode - Enables all notifications, enables system sounds
-PRODUCTIVITY:Productivity Mode: false
-
-# Power Save Mode - Reduces CPU frequency, disables USB suspend
-POWERMODE:Power Save Mode:false
-
-# Quiet Mode - Reduces fan speed, disables disk notifications
-QUIETMODE:Quiet Mode (Low Fan):false
-
-# Development Mode - Enables debug logging, no power management
-DEVMODE:Development Mode: false
+GAMEMODE|Gaming Mode|false
+PRODUCTIVITY|Productivity Mode|false
+POWERMODE|Power Save Mode|false
+QUIETMODE|Quiet Mode (Low Fan)|false
+DEVMODE|Development Mode|false
 EOF
         log_info "Created configuration file at $CONFIG_FILE"
     fi
@@ -112,7 +95,7 @@ check_requirements() {
     fi
     
     # Check if user can use sudo without password for certain commands
-    if !  sudo -n systemctl status &> /dev/null; then
+    if ! sudo -n systemctl status &> /dev/null 2>&1; then
         log_warning "sudo password may be required for system operations"
     fi
     
@@ -143,7 +126,7 @@ set_mode_state() {
 # Mode-Specific Functions
 ###############################################################################
 
-# GAMEMODE:  Optimize for gaming
+# GAMEMODE: Optimize for gaming
 apply_gamemode() {
     log_info "Applying GameMode..."
     
@@ -168,7 +151,7 @@ apply_gamemode() {
     fi
     
     # Disable system updates
-    sudo systemctl stop --no-block reflector. timer 2>/dev/null || true
+    sudo systemctl stop --no-block reflector.timer 2>/dev/null || true
     sudo systemctl mask --now reflector.timer 2>/dev/null || true
     log_success "System updates disabled"
     
@@ -217,30 +200,34 @@ disable_gamemode() {
 }
 
 # PRODUCTIVITY: Maximize focus
-apply_productivitymode() {
+apply_productivity() {
     log_info "Applying Productivity Mode..."
     
     # Enable notifications
     if command -v dunst &> /dev/null; then
         pkill -SIGUSR2 dunst 2>/dev/null || true
+        log_success "Notifications enabled"
     fi
     
     # Enable system sounds
     if command -v pactl &> /dev/null; then
         pactl set-sink-volume @DEFAULT_SINK@ 65536 2>/dev/null || true
+        log_success "System audio enabled"
     fi
     
     # Disable auto-suspend
     sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target 2>/dev/null || true
+    log_success "Auto-suspend disabled"
     
     set_mode_state "PRODUCTIVITY" "true"
     log_success "Productivity Mode enabled!"
 }
 
-disable_productivitymode() {
+disable_productivity() {
     log_info "Disabling Productivity Mode..."
     
     sudo systemctl unmask sleep.target suspend.target hibernate.target hybrid-sleep.target 2>/dev/null || true
+    log_success "Auto-suspend restored"
     
     set_mode_state "PRODUCTIVITY" "false"
     log_success "Productivity Mode disabled!"
@@ -260,6 +247,7 @@ apply_powermode() {
     
     # Enable USB autosuspend
     echo 1 | sudo tee /sys/module/usb_core/parameters/autosuspend 2>/dev/null || true
+    log_success "USB autosuspend enabled"
     
     # Reduce screen brightness to 40%
     if command -v brightnessctl &> /dev/null; then
@@ -284,6 +272,7 @@ disable_powermode() {
     
     # Disable USB autosuspend
     echo 0 | sudo tee /sys/module/usb_core/parameters/autosuspend 2>/dev/null || true
+    log_success "USB autosuspend disabled"
     
     # Restore screen brightness to 100%
     if command -v brightnessctl &> /dev/null; then
@@ -305,9 +294,10 @@ apply_quietmode() {
         log_success "Fan speed reduced"
     fi
     
-    # Disable HDD notifications
+    # Mute audio
     if command -v pactl &> /dev/null; then
         pactl set-sink-mute @DEFAULT_SINK@ 1 2>/dev/null || true
+        log_success "Audio muted"
     fi
     
     # Set CPU governor to powersave
@@ -315,6 +305,7 @@ apply_quietmode() {
         for cpu in /sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_governor; do
             echo "powersave" | sudo tee "$cpu" > /dev/null 2>&1 || true
         done
+        log_success "CPU set to powersave"
     fi
     
     set_mode_state "QUIETMODE" "true"
@@ -333,6 +324,7 @@ disable_quietmode() {
     # Restore audio
     if command -v pactl &> /dev/null; then
         pactl set-sink-mute @DEFAULT_SINK@ 0 2>/dev/null || true
+        log_success "Audio restored"
     fi
     
     # Set CPU governor back to default
@@ -340,6 +332,7 @@ disable_quietmode() {
         for cpu in /sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_governor; do
             echo "schedutil" | sudo tee "$cpu" > /dev/null 2>&1 || true
         done
+        log_success "CPU set to schedutil"
     fi
     
     set_mode_state "QUIETMODE" "false"
@@ -350,14 +343,13 @@ disable_quietmode() {
 apply_devmode() {
     log_info "Applying Development Mode..."
     
-    # Enable debug logging
-    sudo systemctl set-default multi-user.target 2>/dev/null || true
-    
     # Disable automatic updates during development
     sudo systemctl mask --now reflector.timer 2>/dev/null || true
+    log_success "Auto-updates disabled"
     
     # Enable core dumps for debugging
-    ulimit -c unlimited
+    ulimit -c unlimited 2>/dev/null || true
+    log_success "Core dumps enabled"
     
     set_mode_state "DEVMODE" "true"
     log_success "Development Mode enabled!"
@@ -368,9 +360,11 @@ disable_devmode() {
     
     # Re-enable automatic updates
     sudo systemctl unmask reflector.timer 2>/dev/null || true
+    log_success "Auto-updates re-enabled"
     
     # Reset core dumps
-    ulimit -c 0
+    ulimit -c 0 2>/dev/null || true
+    log_success "Core dumps reset"
     
     set_mode_state "DEVMODE" "false"
     log_success "Development Mode disabled!"
@@ -384,7 +378,7 @@ show_banner() {
     clear
     echo -e "${BLUE}"
     echo "╔════════════════════════════════════════╗"
-    echo "║         🎮 ArchMode v1.0.0 🎮          ║"
+    echo "║         🎮 ArchMode v1.1.0 🎮          ║"
     echo "║    System Mode Manager for Arch Linux   ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
@@ -396,8 +390,13 @@ show_menu() {
     echo -e "${YELLOW}Current Modes:${NC}\n"
     
     local counter=1
-    while IFS=': ' read -r mode display_name default_state; do
+    while IFS='|' read -r mode display_name default_state; do
+        # Skip empty lines and comments
         [[ -z "$mode" || "$mode" == \#* ]] && continue
+        
+        # Trim whitespace
+        mode=$(echo "$mode" | xargs)
+        display_name=$(echo "$display_name" | xargs)
         
         local state=$(get_mode_state "$mode")
         local status_symbol="${GREEN}✓${NC}"
@@ -424,7 +423,7 @@ interactive_mode() {
     while true; do
         show_menu
         
-        read -p "Select an option:  " choice
+        read -p "Select an option: " choice
         
         case "$choice" in
             1|2|3|4|5)
@@ -447,7 +446,7 @@ interactive_mode() {
                 exit 0
                 ;;
             *)
-                log_error "Invalid option.  Please try again."
+                log_error "Invalid option. Please try again."
                 sleep 1
                 ;;
         esac
@@ -458,16 +457,18 @@ toggle_mode() {
     local choice="$1"
     local counter=1
     
-    while IFS=':' read -r mode display_name default_state; do
+    while IFS='|' read -r mode display_name default_state; do
         [[ -z "$mode" || "$mode" == \#* ]] && continue
+        mode=$(echo "$mode" | xargs)
         
         if [[ "$counter" == "$choice" ]]; then
             local state=$(get_mode_state "$mode")
+            local mode_lower=$(echo "$mode" | tr '[:upper:]' '[:lower:]')
             
             if [[ "$state" == "false" ]]; then
-                apply_${mode,,}
+                "apply_${mode_lower}"
             else
-                disable_${mode,,}
+                "disable_${mode_lower}"
             fi
             return
         fi
@@ -481,8 +482,10 @@ show_status() {
     
     echo -e "${YELLOW}System Status Report:${NC}\n"
     
-    while IFS=':' read -r mode display_name default_state; do
+    while IFS='|' read -r mode display_name default_state; do
         [[ -z "$mode" || "$mode" == \#* ]] && continue
+        mode=$(echo "$mode" | xargs)
+        display_name=$(echo "$display_name" | xargs)
         
         local state=$(get_mode_state "$mode")
         local status_symbol="${GREEN}ON${NC}"
@@ -503,13 +506,15 @@ show_status() {
 reset_all_modes() {
     log_info "Resetting all modes to default state..."
     
-    while IFS=':' read -r mode display_name default_state; do
+    while IFS='|' read -r mode display_name default_state; do
         [[ -z "$mode" || "$mode" == \#* ]] && continue
+        mode=$(echo "$mode" | xargs)
         
         local current_state=$(get_mode_state "$mode")
         
         if [[ "$current_state" == "true" ]]; then
-            disable_${mode,,}
+            local mode_lower=$(echo "$mode" | tr '[:upper:]' '[:lower:]')
+            "disable_${mode_lower}"
             sleep 1
         fi
     done < "$CONFIG_FILE"
@@ -532,23 +537,27 @@ cli_mode() {
             reset_all_modes
             ;;
         on|enable)
-            if [[ -z "$2" ]]; then
+            if [[ -z "${2:-}" ]]; then
                 log_error "Usage: archmode on <mode>"
                 exit 1
             fi
-            apply_${2,,}
+            local mode_lower=$(echo "$2" | tr '[:upper:]' '[:lower:]')
+            "apply_${mode_lower}"
             ;;
         off|disable)
-            if [[ -z "$2" ]]; then
+            if [[ -z "${2:-}" ]]; then
                 log_error "Usage: archmode off <mode>"
                 exit 1
             fi
-            disable_${2,,}
+            local mode_lower=$(echo "$2" | tr '[:upper:]' '[:lower:]')
+            "disable_${mode_lower}"
             ;;
         list)
             echo "Available modes:"
-            while IFS=':' read -r mode display_name default_state; do
+            while IFS='|' read -r mode display_name default_state; do
                 [[ -z "$mode" || "$mode" == \#* ]] && continue
+                mode=$(echo "$mode" | xargs)
+                display_name=$(echo "$display_name" | xargs)
                 echo "  - $mode: $display_name"
             done < "$CONFIG_FILE"
             ;;
@@ -556,7 +565,7 @@ cli_mode() {
             show_help
             ;;
         *)
-            log_error "Unknown command:  $cmd"
+            log_error "Unknown command: $cmd"
             show_help
             exit 1
             ;;
@@ -565,7 +574,7 @@ cli_mode() {
 
 show_help() {
     cat << EOF
-${BLUE}ArchMode v1.0.0${NC} - System Mode Manager for Arch Linux
+${BLUE}ArchMode v1.1.0${NC} - System Mode Manager for Arch Linux
 
 ${YELLOW}Usage:${NC}
   archmode                         # Interactive menu
@@ -594,9 +603,9 @@ ${YELLOW}Examples:${NC}
 
 ${YELLOW}Configuration:${NC}
   Config:   $CONFIG_FILE
-  Logs:    $LOG_FILE
+  Logs:     $LOG_FILE
 
-${YELLOW}For more information, visit: ${NC}
+${YELLOW}For more information, visit:${NC}
   https://github.com/theofficalnoodles/archmode
 
 EOF
@@ -612,7 +621,7 @@ main() {
     check_requirements || exit 1
     
     # Check if running as root (we'll use sudo instead)
-    if [[ "$EUID" == 0 ]]; then
+    if [[ "$EUID" == "0" ]]; then
         log_error "Please do not run ArchMode as root"
         exit 1
     fi
