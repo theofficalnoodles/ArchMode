@@ -7,11 +7,12 @@ A powerful system mode manager for Arch Linux that lets you toggle system servic
 * **🎮 GameMode** - Optimize for gaming: disable notifications, maximize CPU performance
 * **💼 Productivity Mode** - Stay focused: enable notifications, prevent sleep
 * **⚡ Power Save Mode** - Reduce consumption: lower CPU frequency, dim screen
-* **🔇 Quiet Mode** - Reduce noise: control fan speed, mute audio
+* **🔇 Quiet Mode** - Reduce noise: control fan speed, reduce volume
 * **👨‍💻 Dev Mode** - Development tweaks: disable updates, enable debug logging
 * **💾 Persistent State** - Modes are saved and restored across reboots
 * **📊 Detailed Logging** - Track all changes in the log file
 * **🖥️ Interactive & CLI** - Use the menu or command line interface
+* **🔄 Auto-Update** - Update with a single command
 
 ## Installation
 
@@ -87,18 +88,41 @@ archmode list
 # Reset all modes
 archmode reset
 
+# Update ArchMode
+archmode update
+
 # Show help
 archmode help
+```
+
+### Updating ArchMode
+
+To update ArchMode to the latest version:
+```bash
+archmode update
+```
+
+This will:
+- Download the latest version from GitHub
+- Automatically install the update
+- Preserve your configuration and settings
+- Keep your logs intact
+
+**Manual Update:**
+```bash
+cd ~/ArchMode  # or wherever you cloned it
+git pull origin main
+./install.sh
 ```
 
 ## Available Modes
 
 | Mode | Purpose | Changes |
 | --- | --- | --- |
-| **GAMEMODE** | Gaming optimization | Disables notifications, sets CPU to performance, mutes audio |
+| **GAMEMODE** | Gaming optimization | Disables notifications, sets CPU to performance |
 | **PRODUCTIVITY** | Maximize focus | Enables notifications, prevents sleep |
 | **POWERMODE** | Power efficiency | Reduces CPU speed, enables USB suspend, dims screen |
-| **QUIETMODE** | Reduce noise | Controls fan speed, reduces audio, lowers CPU frequency |
+| **QUIETMODE** | Reduce noise | Controls fan speed, reduces volume, lowers CPU frequency |
 | **DEVMODE** | Development mode | Disables auto-updates, enables debug logging, unlimited core dumps |
 
 ## Configuration
@@ -147,10 +171,11 @@ ArchMode uses `sudo` for system-level operations. To avoid password prompts, you
 * `pulseaudio` / `pipewire` - Audio control
 * `brightnessctl` - Screen brightness control
 * `nbfc` - Fan control
+* `git` - For auto-update feature
 
 Install optional dependencies:
 ```bash
-sudo pacman -S dunst brightnessctl
+sudo pacman -S dunst brightnessctl git
 # For audio control, you likely already have pipewire or pulseaudio
 ```
 
@@ -303,6 +328,13 @@ echo $PATH | grep "/usr/local/bin"
 export PATH="/usr/local/bin:$PATH"
 ```
 
+### Update command fails?
+
+Make sure git is installed:
+```bash
+sudo pacman -S git
+```
+
 ## Uninstallation
 
 To completely remove ArchMode from your system:
@@ -339,104 +371,3 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 - Add GUI interface
 - Write documentation
 - Report bugs
-- Suggest features
-
-## License
-
-MIT License - See [LICENSE](LICENSE) file for details.
-
-This means you can:
-- ✓ Use commercially
-- ✓ Modify
-- ✓ Distribute
-- ✓ Private use
-
-## Support
-
-Having issues or questions?
-
-* 📝 **Check the logs:** `~/.local/share/archmode/archmode.log`
-* 🐛 **Report bugs:** [GitHub Issues](https://github.com/theofficalnoodles/ArchMode/issues)
-* 💬 **Feature requests:** [GitHub Discussions](https://github.com/theofficalnoodles/ArchMode/discussions)
-* 📧 **Contact:** Open an issue on GitHub
-
-## Roadmap
-
-### Planned Features
-
-- [ ] **GUI Interface** - Zenity/fzf-based graphical interface
-- [ ] **Automatic Mode Detection** - Auto-enable GameMode when launching Steam/games
-- [ ] **Custom Mode Creation** - User-defined modes through config files
-- [ ] **Scheduled Mode Switching** - Cron/systemd timer integration
-- [ ] **Display Manager Integration** - Mode selection at login
-- [ ] **Performance Monitoring** - Real-time system stats dashboard
-- [ ] **Hardware Profiles** - Presets for different PC configurations
-- [ ] **Temperature-Based Switching** - Auto-switch modes based on temps
-- [ ] **Battery Mode** - Laptop-specific optimizations
-- [ ] **Network Mode** - Optimize for online gaming/streaming
-- [ ] **Backup/Restore** - Save and restore mode configurations
-
-### Future Ideas
-
-- Integration with game launchers (Steam, Lutris, Heroic)
-- Mobile app for remote mode switching
-- Community mode repository
-- Per-application mode profiles
-- RGB lighting control integration
-
-## Changelog
-
-### v0.1.0 (Beta) - Current
-
-- ✨ Initial release
-- ✨ Basic mode switching functionality
-- ✨ Interactive and CLI interfaces
-- ✨ 5 predefined modes (Game, Productivity, Power Save, Quiet, Dev)
-- ✨ Persistent state across reboots
-- ✨ Logging system
-- ✨ Systemd service support
-- ✨ Color-coded terminal output
-
-### Upcoming in v0.2.0
-
-- 🚀 GUI interface
-- 🚀 Custom mode creation
-- 🚀 Improved error handling
-- 🚀 More hardware compatibility
-
-## FAQ
-
-**Q: Will this harm my system?**  
-A: No, ArchMode only changes system settings temporarily and can be reversed with `archmode reset`.
-
-**Q: Does this work on other distros?**  
-A: It's designed for Arch Linux, but may work on Arch-based distros (Manjaro, EndeavourOS, etc.).
-
-**Q: Can I create my own modes?**  
-A: Not yet, but custom mode creation is planned for v0.2.0!
-
-**Q: Why do I need sudo?**  
-A: System-level changes (CPU governor, services) require root permissions.
-
-**Q: Is this safe for laptops?**  
-A: Yes! Power Save mode is specifically designed for laptops.
-
-**Q: Can I run multiple modes at once?**  
-A: Yes! Modes can be stacked (e.g., `GAMEMODE` + `QUIETMODE`).
-
-## Credits
-
-Created by [theofficalnoodles](https://github.com/theofficalnoodles)
-
-Special thanks to:
-- The Arch Linux community
-- Contributors and testers
-- Everyone who provided feedback
-
----
-
-**Made with ❤️ for Arch Linux**
-
-*ArchMode is currently in beta testing. Please report any issues you encounter!*
-
-**Star ⭐ this repo if you find it useful!**
