@@ -32,7 +32,7 @@ The installer will:
 - ✓ Create configuration directories
 - ✓ Install systemd service (if available)
 
-### From AUR (Coming Soon)
+### From AUR
 ```bash
 yay -S archmode-git
 # or
