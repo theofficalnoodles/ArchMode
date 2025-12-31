@@ -1,4 +1,4 @@
-# Maintainer: theofficalnoodles <khaledbuisness1@gmail.com>
+# Maintainer: theofficalnoodles <your.email@example.com>
 pkgname=archmode
 pkgver=1.0.0
 pkgrel=1
