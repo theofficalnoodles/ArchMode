@@ -1,4 +1,6 @@
 # ArchMode 🎮
+<img width="1024" height="1024" alt="image" src="https://github.com/user-attachments/assets/9d45cea5-e6ff-4641-8564-5b1b32de110c" />
+
 
 A powerful system mode manager for Arch Linux that lets you toggle system services and features on/off with ease. Perfect for gaming, productivity, power saving, and more!
 
