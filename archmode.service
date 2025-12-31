@@ -1,0 +1,14 @@
+[Unit]
+Description=ArchMode System Manager
+Documentation=https://github.com/theofficalnoodles/archmode
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/archmode restore-state
+RemainAfterExit=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
