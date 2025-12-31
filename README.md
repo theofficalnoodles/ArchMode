@@ -32,6 +32,8 @@ The installer will:
 - ✓ Create configuration directories
 - ✓ Install systemd service (if available)
 
+- WARNING: THE ONLY 2 PLACES YOU CAN INSTALL THIS PROGRAM FROM ARE THIS REPOSITORY OR https://archmode.lovable.app/
+
 ### From AUR
 ```bash
 yay -S archmode-git
