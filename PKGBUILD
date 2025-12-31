@@ -1,33 +1,29 @@
-# Maintainer: Your Name <your_email@example.com>
-pkgname=archmode
-pkgver=0.2.0  # Update this based on your version
+pkgname=archmode-git
+pkgver=0.2
 pkgrel=1
-pkgdesc="A system mode manager for Arch Linux to toggle services for gaming, productivity, and more"
-arch=('any')
+pkgdesc="A powerful system mode manager for Arch Linux"
+arch=('x86_64')
 url="https://github.com/theofficalnoodles/ArchMode"
 license=('MIT')
-depends=('bash' 'systemd')
-optdepends=(
-    'dunst: for notification management'
-    'pulseaudio: for audio control'
-    'pipewire: for audio control'
-    'brightnessctl: for screen brightness control'
-)
-source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/v${pkgver}.tar.gz")
-sha256sums=('SKIP')  # Replace with actual checksum
+depends=('bash' 'sudo')
+makedepends=('git')
+source=("git+https://github.com/theofficalnoodles/ArchMode.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$srcdir/ArchMode"
+  printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
 
 package() {
-    cd "${srcdir}/ArchMode-${pkgver}"
-    
-    # Install main script
-    install -Dm755 archmode.sh "${pkgdir}/usr/bin/archmode"
-    
-    # Install systemd service
-    install -Dm644 archmode.service "${pkgdir}/usr/lib/systemd/system/archmode.service"
-    
-    # Install license
-    install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
-    
-    # Install documentation
-    install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+  cd "$srcdir/ArchMode"
+
+  # install the main script
+  install -Dm755 archmode.sh "$pkgdir/usr/bin/archmode"
+
+  # install service file
+  install -Dm644 archmode.service "$pkgdir/usr/lib/systemd/system/archmode.service"
+
+  # install other supporting files if needed
+  install -Dm644 README.md "$pkgdir/usr/share/doc/archmode/README.md"
 }
