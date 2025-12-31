@@ -17,13 +17,7 @@ pkgver() {
 
 package() {
   cd "$srcdir/ArchMode"
-
-  # install the main script
   install -Dm755 archmode.sh "$pkgdir/usr/bin/archmode"
-
-  # install service file
   install -Dm644 archmode.service "$pkgdir/usr/lib/systemd/system/archmode.service"
-
-  # install other supporting files if needed
   install -Dm644 README.md "$pkgdir/usr/share/doc/archmode/README.md"
 }
