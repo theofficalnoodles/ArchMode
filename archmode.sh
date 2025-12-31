@@ -264,4 +264,162 @@ show_help() {
     echo ""
     echo -e "${BOLD}Available Modes:${NC}"
     echo "  GAMEMODE        Gaming optimization"
-    echo "  PRODU
+    echo "  PRODUCTIVITY    Stay focused and productive"
+    echo "  POWERMODE       Power saving mode"
+    echo "  QUIETMODE       Reduce system noise"
+    echo "  DEVMODE         Development environment"
+    echo ""
+    echo -e "${BOLD}Examples:${NC}"
+    echo "  archmode on GAMEMODE"
+    echo "  archmode off POWERMODE"
+    echo "  archmode status"
+    echo "  archmode update"
+    echo ""
+}
+
+# Interactive mode
+interactive_mode() {
+    while true; do
+        clear
+        echo -e "${CYAN}${BOLD}"
+        echo "╔════════════════════════════════════════╗"
+        echo "║           ArchMode Manager             ║"
+        echo "╚════════════════════════════════════════╝"
+        echo -e "${NC}"
+        echo ""
+        
+        # Show current status
+        local i=1
+        declare -A mode_map
+        while IFS=: read -r mode_name display_name default_state; do
+            # Skip comments and empty lines
+            [[ "$mode_name" =~ ^#.*$ ]] && continue
+            [[ -z "$mode_name" ]] && continue
+            
+            local state=$(get_mode_state "$mode_name")
+            mode_map[$i]="$mode_name"
+            
+            if [ "$state" = "true" ]; then
+                echo -e "${GREEN}[$i]${NC} $display_name ${GREEN}[ENABLED]${NC}"
+            else
+                echo -e "${BLUE}[$i]${NC} $display_name ${RED}[DISABLED]${NC}"
+            fi
+            ((i++))
+        done < "$MODES_FILE"
+        
+        echo ""
+        echo -e "${YELLOW}[r]${NC} Reset all modes"
+        echo -e "${YELLOW}[u]${NC} Update ArchMode"
+        echo -e "${YELLOW}[q]${NC} Quit"
+        echo ""
+        read -p "Select option: " -n 1 -r choice
+        echo ""
+        
+        case $choice in
+            [1-5])
+                local selected_mode="${mode_map[$choice]}"
+                if [ -n "$selected_mode" ]; then
+                    case $selected_mode in
+                        GAMEMODE) enable_gamemode ;;
+                        PRODUCTIVITY) enable_productivity ;;
+                        POWERMODE) enable_powermode ;;
+                        QUIETMODE) enable_quietmode ;;
+                        DEVMODE) enable_devmode ;;
+                    esac
+                    sleep 1
+                fi
+                ;;
+            r|R)
+                reset_modes
+                sleep 2
+                ;;
+            u|U)
+                update_archmode
+                exit 0
+                ;;
+            q|Q)
+                echo -e "${GREEN}Goodbye!${NC}"
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}Invalid option${NC}"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+# Main script logic
+case "${1:-}" in
+    on|enable)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Error: No mode specified${NC}"
+            echo "Usage: archmode on [MODE]"
+            exit 1
+        fi
+        
+        case "${2^^}" in
+            GAMEMODE) enable_gamemode ;;
+            PRODUCTIVITY) enable_productivity ;;
+            POWERMODE) enable_powermode ;;
+            QUIETMODE) enable_quietmode ;;
+            DEVMODE) enable_devmode ;;
+            *)
+                echo -e "${RED}Unknown mode: $2${NC}"
+                echo "Run 'archmode list' to see available modes"
+                exit 1
+                ;;
+        esac
+        ;;
+        
+    off|disable)
+        if [ -z "${2:-}" ]; then
+            echo -e "${RED}Error: No mode specified${NC}"
+            echo "Usage: archmode off [MODE]"
+            exit 1
+        fi
+        
+        case "${2^^}" in
+            GAMEMODE) enable_gamemode ;;
+            PRODUCTIVITY) enable_productivity ;;
+            POWERMODE) enable_powermode ;;
+            QUIETMODE) enable_quietmode ;;
+            DEVMODE) enable_devmode ;;
+            *)
+                echo -e "${RED}Unknown mode: $2${NC}"
+                echo "Run 'archmode list' to see available modes"
+                exit 1
+                ;;
+        esac
+        ;;
+        
+    status)
+        show_status
+        ;;
+        
+    list)
+        list_modes
+        ;;
+        
+    reset)
+        reset_modes
+        ;;
+        
+    update)
+        update_archmode
+        ;;
+        
+    help|--help|-h)
+        show_help
+        ;;
+        
+    "")
+        interactive_mode
+        ;;
+        
+    *)
+        echo -e "${RED}Unknown command: $1${NC}"
+        echo "Run 'archmode help' for usage information"
+        exit 1
+        ;;
+esac
