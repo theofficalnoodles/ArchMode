@@ -34,9 +34,9 @@ The installer will:
 
 ### From AUR (Coming Soon)
 ```bash
-yay -S archmode
+yay -S archmode-git
 # or
-paru -S archmode
+paru -S archmode-git
 ```
 
 ### Manual Installation
