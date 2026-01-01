@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ArchMode - System Mode Manager for Arch Linux
-# Version: 0.3.0
+# Version: 0.5.0
 # Enhanced with useful features and better functionality
 
 set -euo pipefail
@@ -24,7 +24,7 @@ STATE_FILE="$CONFIG_DIR/state.conf"
 MODES_FILE="$CONFIG_DIR/modes.conf"
 PROFILES_FILE="$CONFIG_DIR/profiles.conf"
 BACKUP_DIR="$CONFIG_DIR/backups"
-VERSION="0.3.0"
+VERSION="0.5.0"
 
 # Create directories
 mkdir -p "$CONFIG_DIR" "$LOG_DIR" "$BACKUP_DIR"
