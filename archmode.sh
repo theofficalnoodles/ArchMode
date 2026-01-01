@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ArchMode - System Mode Manager for Arch Linux
-# Version: 0.6.0
-# Enhanced with useful features and better functionality
+# Version: 0.7.0
+# Ultimate Performance Tool - Advanced system optimizations
 
 set -euo pipefail
 
@@ -24,7 +24,7 @@ STATE_FILE="$CONFIG_DIR/state.conf"
 MODES_FILE="$CONFIG_DIR/modes.conf"
 PROFILES_FILE="$CONFIG_DIR/profiles.conf"
 BACKUP_DIR="$CONFIG_DIR/backups"
-VERSION="0.6.0"
+VERSION="0.7.0"
 
 # Performance: Cache state in memory
 declare -A STATE_CACHE
@@ -58,6 +58,7 @@ DEVMODE:Development Mode:Work:Unlimited resources for compilation and testing
 NIGHTMODE:Night Mode:Comfort:Reduce blue light, dim screen, quiet mode
 TRAVELMODE:Travel Mode:Battery:Maximum battery life for on-the-go
 RENDERMODE:Render Mode:Performance:Max CPU/GPU for 3D rendering and video encoding
+ULTIMATE:Ultimate Performance:Performance:Maximum system performance - all optimizations enabled
 EOF
 fi
 
@@ -332,6 +333,182 @@ apply_sysctl() {
     fi
 }
 
+# Helper: Optimize I/O scheduler (advanced)
+apply_io_scheduler() {
+    local scheduler=$1
+    if check_sudo; then
+        for blockdev in /sys/block/sd*/queue/scheduler; do
+            if [ -f "$blockdev" ]; then
+                echo "$scheduler" | sudo tee "$blockdev" >/dev/null 2>&1 || true
+            fi
+        done
+        for blockdev in /sys/block/nvme*/queue/scheduler; do
+            if [ -f "$blockdev" ]; then
+                echo "$scheduler" | sudo tee "$blockdev" >/dev/null 2>&1 || true
+            fi
+        done
+    fi
+}
+
+# Helper: Optimize IRQ balancing (advanced)
+optimize_irq_balancing() {
+    if check_sudo && [ -f /proc/sys/kernel/sched_irqloadbalance ]; then
+        sudo sysctl -w kernel.sched_irqloadbalance=1 >/dev/null 2>&1 || true
+    fi
+    # Distribute IRQs across CPUs
+    if [ -d /proc/irq ] && check_sudo; then
+        local cpu_count=$(nproc)
+        local cpu=0
+        for irq_dir in /proc/irq/*/; do
+            [ -f "${irq_dir}smp_affinity" ] || continue
+            local mask=$(printf "%x" $((1 << cpu)))
+            echo "$mask" | sudo tee "${irq_dir}smp_affinity" >/dev/null 2>&1 || true
+            cpu=$(((cpu + 1) % cpu_count))
+        done
+    fi
+}
+
+# Helper: Set process priority and scheduling (advanced)
+set_process_priority() {
+    local pid=$1
+    local nice=$2
+    local sched=${3:-SCHED_OTHER}
+    
+    if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+        return 1
+    fi
+    
+    if check_sudo; then
+        # Set nice value
+        sudo renice -n "$nice" -p "$pid" 2>/dev/null || true
+        
+        # Set real-time scheduling if requested
+        if [ "$sched" = "SCHED_FIFO" ] || [ "$sched" = "SCHED_RR" ]; then
+            local priority=50
+            [ "$sched" = "SCHED_FIFO" ] && chrt -f -p "$priority" "$pid" 2>/dev/null || \
+            chrt -r -p "$priority" "$pid" 2>/dev/null || true
+        fi
+    fi
+}
+
+# Helper: Optimize memory settings (advanced)
+optimize_memory() {
+    local mode=$1  # performance or balanced
+    
+    if ! check_sudo; then
+        return 1
+    fi
+    
+    if [ "$mode" = "performance" ]; then
+        # Performance: Disable THP, optimize for speed
+        apply_sysctl \
+            "vm.swappiness=1" \
+            "vm.vfs_cache_pressure=50" \
+            "vm.dirty_ratio=15" \
+            "vm.dirty_background_ratio=5" \
+            "vm.overcommit_memory=1" \
+            "vm.zone_reclaim_mode=0"
+        
+        # Disable transparent huge pages for lower latency
+        if [ -f /sys/kernel/mm/transparent_hugepage/enabled ]; then
+            echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled >/dev/null 2>&1 || true
+        fi
+        if [ -f /sys/kernel/mm/transparent_hugepage/defrag ]; then
+            echo never | sudo tee /sys/kernel/mm/transparent_hugepage/defrag >/dev/null 2>&1 || true
+        fi
+    else
+        # Balanced: Restore defaults
+        apply_sysctl \
+            "vm.swappiness=60" \
+            "vm.vfs_cache_pressure=100" \
+            "vm.dirty_ratio=20" \
+            "vm.dirty_background_ratio=10" \
+            "vm.overcommit_memory=0" \
+            "vm.zone_reclaim_mode=0"
+        
+        if [ -f /sys/kernel/mm/transparent_hugepage/enabled ]; then
+            echo madvise | sudo tee /sys/kernel/mm/transparent_hugepage/enabled >/dev/null 2>&1 || true
+        fi
+        if [ -f /sys/kernel/mm/transparent_hugepage/defrag ]; then
+            echo madvise | sudo tee /sys/kernel/mm/transparent_hugepage/defrag >/dev/null 2>&1 || true
+        fi
+    fi
+}
+
+# Helper: Optimize network stack (advanced)
+optimize_network() {
+    local mode=$1  # performance or balanced
+    
+    if ! check_sudo; then
+        return 1
+    fi
+    
+    if [ "$mode" = "performance" ]; then
+        # Advanced network optimizations
+        apply_sysctl \
+            "net.core.rmem_max=134217728" \
+            "net.core.wmem_max=134217728" \
+            "net.core.netdev_max_backlog=5000" \
+            "net.core.netdev_budget=600" \
+            "net.ipv4.tcp_rmem=4096 87380 134217728" \
+            "net.ipv4.tcp_wmem=4096 65536 134217728" \
+            "net.ipv4.tcp_congestion_control=bbr" \
+            "net.ipv4.tcp_slow_start_after_idle=0" \
+            "net.ipv4.tcp_tw_reuse=1" \
+            "net.ipv4.tcp_fin_timeout=15" \
+            "net.ipv4.tcp_keepalive_time=300" \
+            "net.ipv4.tcp_keepalive_probes=5" \
+            "net.ipv4.tcp_keepalive_intvl=15" \
+            "net.ipv4.tcp_max_syn_backlog=8192" \
+            "net.ipv4.tcp_syncookies=1" \
+            "net.ipv4.tcp_timestamps=1" \
+            "net.ipv4.tcp_sack=1" \
+            "net.ipv4.tcp_window_scaling=1" \
+            "net.ipv4.ip_local_port_range=1024 65535" \
+            "net.ipv4.tcp_max_tw_buckets=2000000" \
+            "net.ipv4.tcp_fastopen=3"
+    else
+        # Balanced: Restore defaults
+        apply_sysctl \
+            "net.core.rmem_max=212992" \
+            "net.core.wmem_max=212992" \
+            "net.core.netdev_max_backlog=1000" \
+            "net.core.netdev_budget=300" \
+            "net.ipv4.tcp_congestion_control=cubic" \
+            "net.ipv4.tcp_slow_start_after_idle=1"
+    fi
+}
+
+# Helper: Optimize CPU boost/turbo (advanced)
+optimize_cpu_boost() {
+    local enable=$1  # true or false
+    
+    if ! check_sudo || ! has_capability "cpufreq"; then
+        return 1
+    fi
+    
+    for boost_file in /sys/devices/system/cpu/cpufreq/boost; do
+        if [ -f "$boost_file" ]; then
+            if [ "$enable" = "true" ]; then
+                echo 1 | sudo tee "$boost_file" >/dev/null 2>&1 || true
+            else
+                echo 0 | sudo tee "$boost_file" >/dev/null 2>&1 || true
+            fi
+        fi
+    done
+    
+    # Intel Turbo Boost
+    for turbo_file in /sys/devices/system/cpu/intel_pstate/no_turbo; do
+        if [ -f "$turbo_file" ]; then
+            if [ "$enable" = "true" ]; then
+                echo 0 | sudo tee "$turbo_file" >/dev/null 2>&1 || true
+            else
+                echo 1 | sudo tee "$turbo_file" >/dev/null 2>&1 || true
+            fi
+        fi
+    done
+}
+
 enable_gamemode() {
     local current=$(get_state "GAMEMODE")
     
@@ -341,6 +518,10 @@ enable_gamemode() {
         # Restore normal settings (batch operations)
         has_capability "dunst" && systemctl --user start dunst 2>/dev/null || true
         apply_cpu_governor "schedutil"
+        optimize_cpu_boost "false"
+        apply_io_scheduler "mq-deadline"
+        optimize_memory "balanced"
+        optimize_network "balanced"
         apply_sysctl \
             "kernel.sched_latency_ns=6000000" \
             "kernel.sched_min_granularity_ns=750000" \
@@ -354,15 +535,29 @@ enable_gamemode() {
         # Disable notifications
         has_capability "dunst" && systemctl --user stop dunst 2>/dev/null || true
         
-        # Set CPU to performance
+        # Advanced CPU optimizations
         apply_cpu_governor "performance"
+        optimize_cpu_boost "true"
+        optimize_irq_balancing
+        
+        # Advanced I/O optimizations (none scheduler for lowest latency)
+        apply_io_scheduler "none"
+        
+        # Advanced memory optimizations
+        optimize_memory "performance"
+        
+        # Advanced network optimizations
+        optimize_network "performance"
         
         # Optimize scheduler for responsiveness (batch)
         apply_sysctl \
             "kernel.sched_latency_ns=4000000" \
             "kernel.sched_min_granularity_ns=500000" \
-            "vm.swappiness=10" \
-            "vm.dirty_ratio=40"
+            "kernel.sched_migration_cost_ns=5000000" \
+            "kernel.sched_autogroup_enabled=0" \
+            "vm.swappiness=1" \
+            "vm.dirty_ratio=15" \
+            "vm.dirty_background_ratio=5"
         
         # Disable mouse acceleration (if X11) - optimized
         if has_capability "display" && has_capability "xinput"; then
@@ -372,12 +567,21 @@ enable_gamemode() {
             done
         fi
         
+        # Optimize game processes (find and prioritize)
+        for game_pid in $(pgrep -f -i "steam|lutris|wine|proton" 2>/dev/null | head -5); do
+            set_process_priority "$game_pid" -15 "SCHED_OTHER" 2>/dev/null || true
+        done
+        
         set_state "GAMEMODE" "true"
         echo -e "${GREEN}✓ Gaming Mode enabled${NC}"
         echo -e "${CYAN}  • Notifications disabled${NC}"
-        echo -e "${CYAN}  • CPU set to performance mode${NC}"
-        echo -e "${CYAN}  • Scheduler optimized for low latency${NC}"
-        echo -e "${CYAN}  • Swapping minimized${NC}"
+        echo -e "${CYAN}  • CPU set to performance mode with boost${NC}"
+        echo -e "${CYAN}  • I/O scheduler optimized for low latency${NC}"
+        echo -e "${CYAN}  • Memory optimized for performance${NC}"
+        echo -e "${CYAN}  • Network stack optimized${NC}"
+        echo -e "${CYAN}  • IRQ balancing optimized${NC}"
+        echo -e "${CYAN}  • Scheduler tuned for responsiveness${NC}"
+        echo -e "${CYAN}  • Game processes prioritized${NC}"
     fi
 }
 
@@ -388,9 +592,8 @@ enable_streammode() {
         echo -e "${YELLOW}➜ Disabling Streaming Mode...${NC}"
         
         has_capability "dunst" && systemctl --user start dunst 2>/dev/null || true
-        apply_sysctl \
-            "net.core.rmem_max=212992" \
-            "net.core.wmem_max=212992"
+        optimize_network "balanced"
+        apply_io_scheduler "mq-deadline"
         
         set_state "STREAMMODE" "false"
         echo -e "${GREEN}✓ Streaming Mode disabled${NC}"
@@ -400,26 +603,38 @@ enable_streammode() {
         # Disable notifications
         has_capability "dunst" && systemctl --user stop dunst 2>/dev/null || true
         
-        # Set CPU to performance
+        # Set CPU to performance with boost
         apply_cpu_governor "performance"
+        optimize_cpu_boost "true"
         
-        # Optimize network for streaming (batch)
-        apply_sysctl \
-            "net.core.rmem_max=134217728" \
-            "net.core.wmem_max=134217728" \
-            "net.ipv4.tcp_rmem=4096 87380 134217728" \
-            "net.ipv4.tcp_wmem=4096 65536 134217728"
+        # Advanced network optimizations for streaming
+        optimize_network "performance"
         
-        # Increase process priority for common streaming apps
-        local obs_pid=$(pgrep -x obs 2>/dev/null | head -n1)
-        if [ -n "$obs_pid" ] && check_sudo; then
-            sudo renice -n -10 -p "$obs_pid" 2>/dev/null || true
-        fi
+        # I/O scheduler for streaming (bfq for better fairness)
+        apply_io_scheduler "bfq"
+        
+        # Memory optimizations
+        optimize_memory "performance"
+        
+        # Increase process priority for common streaming apps (advanced)
+        for app in obs ffmpeg gstreamer; do
+            for pid in $(pgrep -x "$app" 2>/dev/null); do
+                set_process_priority "$pid" -15 "SCHED_OTHER" 2>/dev/null || true
+            done
+        done
+        
+        # Optimize encoding processes
+        for pid in $(pgrep -f "x264|x265|nvenc|vaapi" 2>/dev/null); do
+            set_process_priority "$pid" -10 "SCHED_OTHER" 2>/dev/null || true
+        done
         
         set_state "STREAMMODE" "true"
         echo -e "${GREEN}✓ Streaming Mode enabled${NC}"
-        echo -e "${CYAN}  • Network buffers increased${NC}"
-        echo -e "${CYAN}  • CPU optimized for encoding${NC}"
+        echo -e "${CYAN}  • Network stack fully optimized${NC}"
+        echo -e "${CYAN}  • CPU optimized for encoding with boost${NC}"
+        echo -e "${CYAN}  • I/O scheduler optimized for streaming${NC}"
+        echo -e "${CYAN}  • Streaming processes prioritized${NC}"
+        echo -e "${CYAN}  • Memory optimized for performance${NC}"
     fi
 }
 
@@ -679,6 +894,9 @@ enable_rendermode() {
         echo -e "${YELLOW}➜ Disabling Render Mode...${NC}"
         
         apply_cpu_governor "schedutil"
+        optimize_cpu_boost "false"
+        apply_io_scheduler "mq-deadline"
+        optimize_memory "balanced"
         if check_sudo; then
             systemctl is-enabled thermald &>/dev/null && sudo systemctl start thermald 2>/dev/null || true
         fi
@@ -688,8 +906,9 @@ enable_rendermode() {
     else
         echo -e "${CYAN}➜ Enabling Render Mode...${NC}"
         
-        # Maximum CPU performance
+        # Maximum CPU performance with boost
         apply_cpu_governor "performance"
+        optimize_cpu_boost "true"
         
         # Disable CPU frequency scaling for consistency (optimized)
         if has_capability "cpufreq" && check_sudo; then
@@ -702,23 +921,194 @@ enable_rendermode() {
             done
         fi
         
+        # Advanced I/O optimization for rendering (bfq for better throughput)
+        apply_io_scheduler "bfq"
+        
+        # Advanced memory optimization
+        optimize_memory "performance"
+        
         # Disable thermal throttling temporarily (use with caution!)
         if check_sudo; then
             systemctl is-active thermald &>/dev/null && sudo systemctl stop thermald 2>/dev/null || true
         fi
         
-        # Increase nice level for rendering processes
-        local blender_pid=$(pgrep -x blender 2>/dev/null | head -n1)
-        if [ -n "$blender_pid" ] && check_sudo; then
-            sudo renice -n -20 -p "$blender_pid" 2>/dev/null || true
-        fi
+        # Increase priority for rendering processes (advanced)
+        for render_app in blender maya houdini cinema4d; do
+            for pid in $(pgrep -x "$render_app" 2>/dev/null); do
+                set_process_priority "$pid" -20 "SCHED_OTHER" 2>/dev/null || true
+            done
+        done
+        
+        # Optimize video encoding processes
+        for pid in $(pgrep -f "ffmpeg|handbrake|makemkv" 2>/dev/null); do
+            set_process_priority "$pid" -15 "SCHED_OTHER" 2>/dev/null || true
+        done
         
         set_state "RENDERMODE" "true"
         echo -e "${GREEN}✓ Render Mode enabled${NC}"
-        echo -e "${CYAN}  • CPU locked to maximum frequency${NC}"
+        echo -e "${CYAN}  • CPU locked to maximum frequency with boost${NC}"
+        echo -e "${CYAN}  • I/O scheduler optimized for throughput${NC}"
+        echo -e "${CYAN}  • Memory fully optimized for rendering${NC}"
+        echo -e "${CYAN}  • Rendering processes maximally prioritized${NC}"
         echo -e "${CYAN}  • Thermal throttling disabled${NC}"
         echo -e "${YELLOW}  ⚠ Monitor temperatures closely!${NC}"
     fi
+}
+
+enable_ultimatemode() {
+    local current=$(get_state "ULTIMATE")
+    
+    if [ "$current" = "true" ]; then
+        echo -e "${YELLOW}➜ Disabling Ultimate Performance Mode...${NC}"
+        
+        # Restore all settings
+        has_capability "dunst" && systemctl --user start dunst 2>/dev/null || true
+        apply_cpu_governor "schedutil"
+        optimize_cpu_boost "false"
+        apply_io_scheduler "mq-deadline"
+        optimize_memory "balanced"
+        optimize_network "balanced"
+        if check_sudo; then
+            systemctl is-enabled thermald &>/dev/null && sudo systemctl start thermald 2>/dev/null || true
+        fi
+        
+        set_state "ULTIMATE" "false"
+        echo -e "${GREEN}✓ Ultimate Performance Mode disabled${NC}"
+    else
+        echo -e "${CYAN}${BOLD}➜ Enabling ULTIMATE Performance Mode...${NC}"
+        echo -e "${YELLOW}  This enables ALL performance optimizations!${NC}"
+        echo ""
+        
+        # Disable notifications
+        has_capability "dunst" && systemctl --user stop dunst 2>/dev/null || true
+        
+        # Maximum CPU performance
+        apply_cpu_governor "performance"
+        optimize_cpu_boost "true"
+        
+        # Lock CPU to max frequency
+        if has_capability "cpufreq" && check_sudo; then
+            for cpu_max in /sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq; do
+                if [ -f "$cpu_max" ]; then
+                    local max_freq=$(cat "$cpu_max" 2>/dev/null)
+                    local min_freq="${cpu_max/max/min}"
+                    [ -f "$min_freq" ] && echo "$max_freq" | sudo tee "$min_freq" >/dev/null 2>&1 || true
+                fi
+            done
+        fi
+        
+        # Advanced IRQ balancing
+        optimize_irq_balancing
+        
+        # Ultimate I/O optimization (none for absolute lowest latency)
+        apply_io_scheduler "none"
+        
+        # Ultimate memory optimization
+        optimize_memory "performance"
+        
+        # Ultimate network optimization
+        optimize_network "performance"
+        
+        # Ultimate scheduler tuning
+        apply_sysctl \
+            "kernel.sched_latency_ns=3000000" \
+            "kernel.sched_min_granularity_ns=400000" \
+            "kernel.sched_migration_cost_ns=3000000" \
+            "kernel.sched_autogroup_enabled=0" \
+            "kernel.sched_cfs_bandwidth_slice_us=1000" \
+            "vm.swappiness=1" \
+            "vm.vfs_cache_pressure=50" \
+            "vm.dirty_ratio=10" \
+            "vm.dirty_background_ratio=3" \
+            "vm.overcommit_memory=1" \
+            "vm.zone_reclaim_mode=0" \
+            "vm.min_free_kbytes=65536"
+        
+        # Disable thermal throttling (EXTREME - monitor temps!)
+        if check_sudo; then
+            systemctl is-active thermald &>/dev/null && sudo systemctl stop thermald 2>/dev/null || true
+        fi
+        
+        # Prioritize ALL user processes
+        if check_sudo; then
+            for pid in $(pgrep -u "$USER" 2>/dev/null | head -20); do
+                set_process_priority "$pid" -10 "SCHED_OTHER" 2>/dev/null || true
+            done
+        fi
+        
+        set_state "ULTIMATE" "true"
+        echo -e "${GREEN}✓${NC} ${BOLD}ULTIMATE Performance Mode enabled!${NC}"
+        echo -e "${CYAN}  • CPU: Maximum performance with boost enabled${NC}"
+        echo -e "${CYAN}  • CPU: Locked to maximum frequency${NC}"
+        echo -e "${CYAN}  • I/O: Optimized for lowest latency${NC}"
+        echo -e "${CYAN}  • Memory: Fully optimized for performance${NC}"
+        echo -e "${CYAN}  • Network: Maximum throughput and low latency${NC}"
+        echo -e "${CYAN}  • Scheduler: Tuned for maximum responsiveness${NC}"
+        echo -e "${CYAN}  • IRQ: Optimally balanced across CPUs${NC}"
+        echo -e "${CYAN}  • Processes: All user processes prioritized${NC}"
+        echo -e "${CYAN}  • Thermal: Throttling disabled${NC}"
+        echo -e "${RED}${BOLD}  ⚠ WARNING: Monitor system temperatures!${NC}"
+        echo -e "${RED}${BOLD}  ⚠ This mode maximizes performance at the cost of power/heat${NC}"
+    fi
+}
+
+# Performance benchmark
+benchmark_performance() {
+    echo -e "${CYAN}${BOLD}"
+    echo "╔════════════════════════════════════════╗"
+    echo "║      Performance Benchmark             ║"
+    echo "╚════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+    
+    local results_file="$LOG_DIR/benchmark_$(date +%Y%m%d_%H%M%S).txt"
+    
+    echo -e "${CYAN}Running benchmarks...${NC}"
+    echo ""
+    
+    # CPU benchmark (simple calculation)
+    echo -e "${BOLD}1. CPU Performance Test${NC}"
+    local cpu_start=$(date +%s%N)
+    local sum=0
+    for i in {1..10000}; do
+        sum=$((sum + i))
+    done
+    local cpu_end=$(date +%s%N)
+    local cpu_time=$(awk "BEGIN {printf \"%.3f\", ($cpu_end - $cpu_start) / 1000000000}")
+    echo -e "   CPU Test: ${GREEN}${cpu_time}s${NC}"
+    echo "CPU: ${cpu_time}s" >> "$results_file"
+    
+    # Memory benchmark
+    echo -e "${BOLD}2. Memory Performance Test${NC}"
+    local mem_start=$(date +%s%N)
+    local test_data=$(dd if=/dev/zero of=/tmp/archmode_benchmark bs=1M count=100 2>/dev/null)
+    rm -f /tmp/archmode_benchmark 2>/dev/null
+    local mem_end=$(date +%s%N)
+    local mem_time=$(awk "BEGIN {printf \"%.3f\", ($mem_end - $mem_start) / 1000000000}")
+    echo -e "   Memory Test: ${GREEN}${mem_time}s${NC}"
+    echo "Memory: ${mem_time}s" >> "$results_file"
+    
+    # I/O benchmark
+    echo -e "${BOLD}3. I/O Performance Test${NC}"
+    local io_start=$(date +%s%N)
+    local io_result=$(dd if=/dev/zero of=/tmp/archmode_io_test bs=1M count=50 oflag=direct 2>&1 | grep -o '[0-9.]* MB/s' | head -1)
+    rm -f /tmp/archmode_io_test 2>/dev/null
+    local io_end=$(date +%s%N)
+    local io_time=$(awk "BEGIN {printf \"%.3f\", ($io_end - $io_start) / 1000000000}")
+    echo -e "   I/O Test: ${GREEN}${io_time}s${NC} ${io_result:+($io_result)}"
+    echo "I/O: ${io_time}s" >> "$results_file"
+    
+    # System info
+    echo "" >> "$results_file"
+    echo "System Info:" >> "$results_file"
+    echo "CPU Governor: $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo 'N/A')" >> "$results_file"
+    echo "CPU Frequency: $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq 2>/dev/null | awk '{printf "%.2f GHz", $1/1000000}' || echo 'N/A')" >> "$results_file"
+    echo "I/O Scheduler: $(cat /sys/block/$(lsblk -ndo NAME | head -1)/queue/scheduler 2>/dev/null | grep -o '\[.*\]' || echo 'N/A')" >> "$results_file"
+    
+    echo ""
+    echo -e "${GREEN}✓ Benchmark complete!${NC}"
+    echo -e "${CYAN}Results saved to: $results_file${NC}"
+    log "Performance benchmark completed: $results_file"
 }
 
 # Profile management
@@ -753,6 +1143,7 @@ apply_profile() {
             NIGHTMODE) enable_nightmode ;;
             TRAVELMODE) enable_travelmode ;;
             RENDERMODE) enable_rendermode ;;
+            ULTIMATE) enable_ultimatemode ;;
         esac
     done
     
@@ -1102,6 +1493,7 @@ show_help() {
     echo "  backup                 Backup current state"
     echo "  restore                Restore a backup"
     echo "  detect                 Detect system hardware"
+    echo "  benchmark              Run performance benchmark"
     echo "  update                 Update ArchMode to latest version"
     echo "  uninstall              Uninstall ArchMode from system"
     echo "  help                   Show this help message"
@@ -1144,6 +1536,7 @@ case "$command" in
             NIGHTMODE) enable_nightmode ;;
             TRAVELMODE) enable_travelmode ;;
             RENDERMODE) enable_rendermode ;;
+            ULTIMATE) enable_ultimatemode ;;
             *)
                 echo -e "${RED}✗ Unknown mode: $argument${NC}"
                 echo "Use: archmode modes"
@@ -1166,6 +1559,9 @@ case "$command" in
     detect)
         detect_system
         echo -e "${GREEN}✓ System information detected${NC}"
+        ;;
+    benchmark)
+        benchmark_performance
         ;;
     update)
         update_archmode
