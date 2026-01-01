@@ -128,6 +128,7 @@ git pull origin main
 | **POWERMODE** | Power efficiency | Reduces CPU speed, enables USB suspend, dims screen |
 | **QUIETMODE** | Reduce noise | Controls fan speed, reduces volume, lowers CPU frequency |
 | **DEVMODE** | Development mode | Disables auto-updates, enables debug logging, unlimited core dumps |
+| **ALOT MORE** |
 
 ## Configuration
 
@@ -344,6 +345,8 @@ sudo pacman -S git
 To completely remove ArchMode from your system:
 ```bash
 # Remove the main script
+archmode unistall
+| **OR** |
 sudo rm /usr/local/bin/archmode
 
 # Remove systemd service (if installed)
