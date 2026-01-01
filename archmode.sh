@@ -699,6 +699,139 @@ reset_all() {
     echo -e "${GREEN}✓ All modes have been reset to defaults${NC}"
 }
 
+# Update ArchMode from GitHub
+update_archmode() {
+    local GITHUB_REPO="https://github.com/theofficalnoodles/ArchMode"
+    local INSTALLED_SCRIPT="/usr/local/bin/archmode"
+    local TEMP_DIR=$(mktemp -d)
+    local BACKUP_SCRIPT="$INSTALLED_SCRIPT.backup.$(date +%Y%m%d_%H%M%S)"
+    
+    echo -e "${CYAN}${BOLD}"
+    echo "╔════════════════════════════════════════╗"
+    echo "║        Updating ArchMode                ║"
+    echo "╚════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+    
+    # Check if script is installed
+    if [ ! -f "$INSTALLED_SCRIPT" ]; then
+        echo -e "${RED}✗ ArchMode not found at $INSTALLED_SCRIPT${NC}"
+        echo -e "${YELLOW}  Please install ArchMode first${NC}"
+        return 1
+    fi
+    
+    # Check for git or curl/wget
+    if command -v git &>/dev/null; then
+        echo -e "${CYAN}➜ Using git to download latest version...${NC}"
+        
+        # Clone the repository
+        if git clone "$GITHUB_REPO.git" "$TEMP_DIR/ArchMode" 2>/dev/null; then
+            if [ -f "$TEMP_DIR/ArchMode/archmode.sh" ]; then
+                local NEW_SCRIPT="$TEMP_DIR/ArchMode/archmode.sh"
+            else
+                echo -e "${RED}✗ archmode.sh not found in repository${NC}"
+                rm -rf "$TEMP_DIR"
+                return 1
+            fi
+        else
+            echo -e "${RED}✗ Failed to clone repository${NC}"
+            rm -rf "$TEMP_DIR"
+            return 1
+        fi
+    elif command -v curl &>/dev/null; then
+        echo -e "${CYAN}➜ Using curl to download latest version...${NC}"
+        
+        # Download the script directly
+        local NEW_SCRIPT="$TEMP_DIR/archmode.sh"
+        if curl -sL "$GITHUB_REPO/raw/main/archmode.sh" -o "$NEW_SCRIPT"; then
+            if [ ! -f "$NEW_SCRIPT" ] || [ ! -s "$NEW_SCRIPT" ]; then
+                echo -e "${RED}✗ Failed to download script${NC}"
+                rm -rf "$TEMP_DIR"
+                return 1
+            fi
+        else
+            echo -e "${RED}✗ Failed to download from GitHub${NC}"
+            rm -rf "$TEMP_DIR"
+            return 1
+        fi
+    elif command -v wget &>/dev/null; then
+        echo -e "${CYAN}➜ Using wget to download latest version...${NC}"
+        
+        # Download the script directly
+        local NEW_SCRIPT="$TEMP_DIR/archmode.sh"
+        if wget -q "$GITHUB_REPO/raw/main/archmode.sh" -O "$NEW_SCRIPT"; then
+            if [ ! -f "$NEW_SCRIPT" ] || [ ! -s "$NEW_SCRIPT" ]; then
+                echo -e "${RED}✗ Failed to download script${NC}"
+                rm -rf "$TEMP_DIR"
+                return 1
+            fi
+        else
+            echo -e "${RED}✗ Failed to download from GitHub${NC}"
+            rm -rf "$TEMP_DIR"
+            return 1
+        fi
+    else
+        echo -e "${RED}✗ No download tool available (git, curl, or wget required)${NC}"
+        echo -e "${YELLOW}  Install one with: sudo pacman -S git${NC}"
+        return 1
+    fi
+    
+    # Check if new version is different
+    if cmp -s "$INSTALLED_SCRIPT" "$NEW_SCRIPT" 2>/dev/null; then
+        echo -e "${GREEN}✓ Already running the latest version${NC}"
+        rm -rf "$TEMP_DIR"
+        return 0
+    fi
+    
+    # Get new version number
+    local NEW_VERSION=$(grep -m1 "^VERSION=" "$NEW_SCRIPT" 2>/dev/null | cut -d'"' -f2 || echo "unknown")
+    echo -e "${CYAN}➜ New version found: ${BOLD}$NEW_VERSION${NC}"
+    echo -e "${CYAN}  Current version: ${BOLD}$VERSION${NC}"
+    echo ""
+    
+    # Backup current script
+    echo -e "${CYAN}➜ Backing up current version...${NC}"
+    if sudo cp "$INSTALLED_SCRIPT" "$BACKUP_SCRIPT"; then
+        echo -e "${GREEN}✓ Backup created: $BACKUP_SCRIPT${NC}"
+        log "Backup created before update: $BACKUP_SCRIPT"
+    else
+        echo -e "${YELLOW}⚠ Failed to create backup (continuing anyway)${NC}"
+    fi
+    
+    # Install new version
+    echo -e "${CYAN}➜ Installing new version...${NC}"
+    if sudo cp "$NEW_SCRIPT" "$INSTALLED_SCRIPT" && sudo chmod +x "$INSTALLED_SCRIPT"; then
+        echo -e "${GREEN}✓ New version installed successfully${NC}"
+        log "Updated to version $NEW_VERSION"
+    else
+        echo -e "${RED}✗ Failed to install new version${NC}"
+        echo -e "${YELLOW}  Restoring from backup...${NC}"
+        sudo cp "$BACKUP_SCRIPT" "$INSTALLED_SCRIPT" 2>/dev/null || true
+        rm -rf "$TEMP_DIR"
+        return 1
+    fi
+    
+    # Clean up temporary files
+    rm -rf "$TEMP_DIR"
+    
+    # Optionally remove old backups (keep last 3)
+    local backups=($(ls -t "$INSTALLED_SCRIPT".backup.* 2>/dev/null))
+    if [ ${#backups[@]} -gt 3 ]; then
+        echo -e "${CYAN}➜ Cleaning up old backups...${NC}"
+        for ((i=3; i<${#backups[@]}; i++)); do
+            sudo rm -f "${backups[$i]}"
+        done
+    fi
+    
+    echo ""
+    echo -e "${GREEN}✓${NC} ${BOLD}Update complete!${NC}"
+    echo -e "${CYAN}  ArchMode has been updated to version $NEW_VERSION${NC}"
+    echo -e "${CYAN}  Your configuration and logs have been preserved${NC}"
+    echo ""
+    echo -e "${YELLOW}Note:${NC} If you're running this update command, you may need to"
+    echo -e "      restart your terminal or run: ${BOLD}hash -r${NC}"
+}
+
 # Help / usage
 show_help() {
     echo -e "${CYAN}${BOLD}"
@@ -717,12 +850,14 @@ show_help() {
     echo "  backup                 Backup current state"
     echo "  restore                Restore a backup"
     echo "  detect                 Detect system hardware"
+    echo "  update                 Update ArchMode to latest version"
     echo "  help                   Show this help message"
     echo ""
     echo -e "${BOLD}Examples:${NC}"
     echo "  archmode enable GAMEMODE"
     echo "  archmode profile GAMER"
     echo "  archmode reset"
+    echo "  archmode update"
 }
 
 # ============================================
@@ -778,6 +913,9 @@ case "$command" in
     detect)
         detect_system
         echo -e "${GREEN}✓ System information detected${NC}"
+        ;;
+    update)
+        update_archmode
         ;;
     help|--help|-h)
         show_help
