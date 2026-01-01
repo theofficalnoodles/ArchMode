@@ -345,8 +345,6 @@ sudo pacman -S git
 To completely remove ArchMode from your system:
 ```bash
 # Remove the main script
-archmode unistall
-| **OR** |
 sudo rm /usr/local/bin/archmode
 
 # Remove systemd service (if installed)
@@ -358,6 +356,8 @@ sudo systemctl daemon-reload
 rm -rf ~/.config/archmode
 rm -rf ~/.local/share/archmode
 ```
+| **OR** |
+#archmode unistall
 
 ## Contributing
 
