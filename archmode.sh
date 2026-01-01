@@ -708,7 +708,7 @@ update_archmode() {
     
     echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║        Updating ArchMode                ║"
+    echo "║         Updating ArchMode              ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
@@ -832,6 +832,87 @@ update_archmode() {
     echo -e "      restart your terminal or run: ${BOLD}hash -r${NC}"
 }
 
+# Uninstall ArchMode
+uninstall_archmode() {
+    local INSTALLED_SCRIPT="/usr/local/bin/archmode"
+    local SYSTEMD_SERVICE="/etc/systemd/system/archmode.service"
+    
+    echo -e "${CYAN}${BOLD}"
+    echo "╔════════════════════════════════════════╗"
+    echo "║        Uninstalling ArchMode           ║"
+    echo "╚════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+    
+    # Check if script is installed
+    if [ ! -f "$INSTALLED_SCRIPT" ]; then
+        echo -e "${YELLOW}⚠ ArchMode not found at $INSTALLED_SCRIPT${NC}"
+        echo -e "${CYAN}  It may already be uninstalled${NC}"
+    else
+        echo -e "${CYAN}➜ Removing ArchMode script...${NC}"
+        if sudo rm -f "$INSTALLED_SCRIPT"; then
+            echo -e "${GREEN}✓ Script removed${NC}"
+            log "ArchMode uninstalled"
+        else
+            echo -e "${RED}✗ Failed to remove script${NC}"
+            return 1
+        fi
+    fi
+    
+    # Remove systemd service if it exists
+    if [ -f "$SYSTEMD_SERVICE" ]; then
+        echo -e "${CYAN}➜ Removing systemd service...${NC}"
+        sudo systemctl disable archmode 2>/dev/null || true
+        if sudo rm -f "$SYSTEMD_SERVICE"; then
+            sudo systemctl daemon-reload 2>/dev/null || true
+            echo -e "${GREEN}✓ Systemd service removed${NC}"
+        else
+            echo -e "${YELLOW}⚠ Failed to remove systemd service${NC}"
+        fi
+    fi
+    
+    # Ask about config and data
+    echo ""
+    echo -e "${YELLOW}Configuration and data files:${NC}"
+    echo -e "  ${CYAN}~/.config/archmode${NC}"
+    echo -e "  ${CYAN}~/.local/share/archmode${NC}"
+    echo ""
+    read -p "Do you want to remove configuration and data files? (y/N): " remove_config
+    
+    if [[ "$remove_config" == "y" || "$remove_config" == "Y" ]]; then
+        echo -e "${CYAN}➜ Removing configuration files...${NC}"
+        if rm -rf "$CONFIG_DIR"; then
+            echo -e "${GREEN}✓ Configuration removed${NC}"
+        else
+            echo -e "${YELLOW}⚠ Failed to remove configuration${NC}"
+        fi
+        
+        echo -e "${CYAN}➜ Removing data files...${NC}"
+        if rm -rf "$LOG_DIR"; then
+            echo -e "${GREEN}✓ Data files removed${NC}"
+        else
+            echo -e "${YELLOW}⚠ Failed to remove data files${NC}"
+        fi
+    else
+        echo -e "${CYAN}➜ Configuration and data files preserved${NC}"
+    fi
+    
+    # Remove backups
+    local backups=($(ls -t "$INSTALLED_SCRIPT".backup.* 2>/dev/null))
+    if [ ${#backups[@]} -gt 0 ]; then
+        echo -e "${CYAN}➜ Removing backup files...${NC}"
+        for backup in "${backups[@]}"; do
+            sudo rm -f "$backup" 2>/dev/null || true
+        done
+        echo -e "${GREEN}✓ Backups removed${NC}"
+    fi
+    
+    echo ""
+    echo -e "${GREEN}✓${NC} ${BOLD}Uninstallation complete!${NC}"
+    echo -e "${CYAN}  ArchMode has been removed from your system${NC}"
+    echo ""
+}
+
 # Help / usage
 show_help() {
     echo -e "${CYAN}${BOLD}"
@@ -851,6 +932,7 @@ show_help() {
     echo "  restore                Restore a backup"
     echo "  detect                 Detect system hardware"
     echo "  update                 Update ArchMode to latest version"
+    echo "  uninstall              Uninstall ArchMode from system"
     echo "  help                   Show this help message"
     echo ""
     echo -e "${BOLD}Examples:${NC}"
@@ -916,6 +998,9 @@ case "$command" in
         ;;
     update)
         update_archmode
+        ;;
+    uninstall)
+        uninstall_archmode
         ;;
     help|--help|-h)
         show_help
