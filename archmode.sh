@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ArchMode - System Mode Manager for Arch Linux
-# Version: 0.7.0
+# Version: 0.8.0
 # Ultimate Performance Tool - Advanced system optimizations
 
 set -euo pipefail
@@ -24,7 +24,7 @@ STATE_FILE="$CONFIG_DIR/state.conf"
 MODES_FILE="$CONFIG_DIR/modes.conf"
 PROFILES_FILE="$CONFIG_DIR/profiles.conf"
 BACKUP_DIR="$CONFIG_DIR/backups"
-VERSION="0.7.0"
+VERSION="0.8.0"
 
 # Performance: Cache state in memory
 declare -A STATE_CACHE
@@ -1114,25 +1114,31 @@ benchmark_performance() {
 # Profile management
 apply_profile() {
     local profile=$1
+    # Convert to uppercase for case-insensitive matching
+    profile=$(echo "$profile" | tr '[:lower:]' '[:upper:]')
     
-    # Find profile in config
-    local profile_line=$(grep "^$profile:" "$PROFILES_FILE" 2>/dev/null)
+    # Find profile in config (case-insensitive)
+    local profile_line=$(grep -i "^$profile:" "$PROFILES_FILE" 2>/dev/null | head -1)
     
     if [ -z "$profile_line" ]; then
         echo -e "${RED}✗ Profile '$profile' not found${NC}"
         return 1
     fi
     
+    # Extract actual profile name from line (first field)
+    local actual_profile=$(echo "$profile_line" | cut -d: -f1)
     local modes=$(echo "$profile_line" | cut -d: -f2)
     local description=$(echo "$profile_line" | cut -d: -f3)
     
-    echo -e "${CYAN}➜ Applying profile: ${BOLD}$profile${NC}"
+    echo -e "${CYAN}➜ Applying profile: ${BOLD}$actual_profile${NC}"
     echo -e "${CYAN}  $description${NC}"
     echo ""
     
-    # Split modes and enable each
+    # Split modes and enable each (already uppercase in config)
     IFS=',' read -ra MODE_ARRAY <<< "$modes"
     for mode in "${MODE_ARRAY[@]}"; do
+        # Trim whitespace and ensure uppercase
+        mode=$(echo "$mode" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
         case "$mode" in
             GAMEMODE) enable_gamemode ;;
             STREAMMODE) enable_streammode ;;
@@ -1500,7 +1506,9 @@ show_help() {
     echo ""
     echo -e "${BOLD}Examples:${NC}"
     echo "  archmode enable GAMEMODE"
+    echo "  archmode enable gamemode    # Case-insensitive"
     echo "  archmode profile GAMER"
+    echo "  archmode profile gamer     # Case-insensitive"
     echo "  archmode reset"
     echo "  archmode update"
 }
@@ -1526,6 +1534,8 @@ case "$command" in
         list_profiles
         ;;
     enable)
+        # Convert to uppercase for case-insensitive matching
+        argument=$(echo "$argument" | tr '[:lower:]' '[:upper:]')
         case "$argument" in
             GAMEMODE) enable_gamemode ;;
             STREAMMODE) enable_streammode ;;
@@ -1545,6 +1555,8 @@ case "$command" in
         esac
         ;;
     profile)
+        # Convert to uppercase for case-insensitive matching
+        argument=$(echo "$argument" | tr '[:lower:]' '[:upper:]')
         apply_profile "$argument"
         ;;
     reset)
