@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # ArchMode - System Mode Manager for Arch Linux
-# Version: 0.2.0
+# Version: 0.3.0
+# Enhanced with useful features and better functionality
 
 set -euo pipefail
 
@@ -13,7 +14,7 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 MAGENTA='\033[0;35m'
 BOLD='\033[1m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 # Configuration
 CONFIG_DIR="$HOME/.config/archmode"
@@ -21,45 +22,44 @@ LOG_DIR="$HOME/.local/share/archmode"
 LOG_FILE="$LOG_DIR/archmode.log"
 STATE_FILE="$CONFIG_DIR/state.conf"
 MODES_FILE="$CONFIG_DIR/modes.conf"
-TWEAKS_FILE="$CONFIG_DIR/tweaks.conf"
-VERSION="0.2.0"
+PROFILES_FILE="$CONFIG_DIR/profiles.conf"
+BACKUP_DIR="$CONFIG_DIR/backups"
+VERSION="0.3.0"
 
-# Create directories if they don't exist
-mkdir -p "$CONFIG_DIR"
-mkdir -p "$LOG_DIR"
+# Create directories
+mkdir -p "$CONFIG_DIR" "$LOG_DIR" "$BACKUP_DIR"
 
 # Initialize state file
-if [ ! -f "$STATE_FILE" ]; then
-    touch "$STATE_FILE"
-fi
+[ ! -f "$STATE_FILE" ] && touch "$STATE_FILE"
 
 # Initialize modes configuration
 if [ ! -f "$MODES_FILE" ]; then
     cat > "$MODES_FILE" << 'EOF'
 # ArchMode Configuration
-# Format: MODE_NAME:Display Name:Default State (true/false)
-GAMEMODE:Gaming Mode:false
-PRODUCTIVITY:Productivity Mode:false
-POWERMODE:Power Save Mode:false
-QUIETMODE:Quiet Mode (Low Fan):false
-DEVMODE:Development Mode:false
-STREAMMODE:Streaming Mode:false
+# Format: MODE_NAME:Display Name:Category:Description
+GAMEMODE:Gaming Mode:Performance:Max CPU, disable notifications, optimize latency
+STREAMMODE:Streaming Mode:Performance:Optimize for OBS/streaming, network tweaks
+PRODUCTIVITY:Productivity Mode:Work:Enable notifications, prevent sleep, focus mode
+POWERMODE:Power Save Mode:Battery:Reduce power consumption for laptops
+QUIETMODE:Quiet Mode:Comfort:Reduce fan noise and system sounds
+DEVMODE:Development Mode:Work:Unlimited resources for compilation and testing
+NIGHTMODE:Night Mode:Comfort:Reduce blue light, dim screen, quiet mode
+TRAVELMODE:Travel Mode:Battery:Maximum battery life for on-the-go
+RENDERMODE:Render Mode:Performance:Max CPU/GPU for 3D rendering and video encoding
 EOF
 fi
 
-# Initialize tweaks configuration
-if [ ! -f "$TWEAKS_FILE" ]; then
-    cat > "$TWEAKS_FILE" << 'EOF'
-# ArchMode Tweaks Configuration
-# Format: TWEAK_NAME:Display Name:Default State (true/false)
-SWAPPINESS:Reduce Swappiness:false
-NOATIME:Disable Access Time:false
-TCPCONGESTION:Optimize TCP:false
-IOSCHEDULER:Set I/O Scheduler:false
-ZRAM:Enable ZRAM:false
-EARLYOOM:Enable Early OOM:false
-PRELOAD:Enable Preload:false
-IRQBALANCE:Enable IRQ Balance:false
+# Initialize profiles
+if [ ! -f "$PROFILES_FILE" ]; then
+    cat > "$PROFILES_FILE" << 'EOF'
+# ArchMode Profiles
+# Format: PROFILE_NAME:MODES_LIST:DESCRIPTION
+GAMER:GAMEMODE:Hardcore gaming session
+STREAMER:STREAMMODE,GAMEMODE:Stream and play simultaneously
+WORKER:PRODUCTIVITY:Focused work environment
+TRAVELER:TRAVELMODE,QUIETMODE:Portable productivity
+CREATOR:RENDERMODE,DEVMODE:Content creation and rendering
+NIGHT_OWL:NIGHTMODE,QUIETMODE:Late night computing
 EOF
 fi
 
@@ -68,22 +68,36 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG_FILE"
 }
 
-# Get state (works for both modes and tweaks)
-get_state() {
-    local item=$1
-    if grep -q "^$item=" "$STATE_FILE"; then
-        grep "^$item=" "$STATE_FILE" | cut -d= -f2
+# System info detection
+detect_system() {
+    local cpu_count=$(nproc)
+    local total_mem=$(free -g | awk '/^Mem:/{print $2}')
+    local gpu_vendor=$(lspci | grep -i 'vga\|3d' | head -n1)
+    
+    echo "CPU_CORES=$cpu_count" > "$CONFIG_DIR/system.info"
+    echo "TOTAL_RAM=${total_mem}G" >> "$CONFIG_DIR/system.info"
+    echo "GPU=$gpu_vendor" >> "$CONFIG_DIR/system.info"
+    
+    # Detect if laptop
+    if [ -d /sys/class/power_supply/BAT0 ] || [ -d /sys/class/power_supply/BAT1 ]; then
+        echo "IS_LAPTOP=true" >> "$CONFIG_DIR/system.info"
     else
-        echo "false"
+        echo "IS_LAPTOP=false" >> "$CONFIG_DIR/system.info"
     fi
 }
 
-# Set state (works for both modes and tweaks)
+# Get state
+get_state() {
+    local item=$1
+    grep "^$item=" "$STATE_FILE" 2>/dev/null | cut -d= -f2 || echo "false"
+}
+
+# Set state
 set_state() {
     local item=$1
     local state=$2
     
-    if grep -q "^$item=" "$STATE_FILE"; then
+    if grep -q "^$item=" "$STATE_FILE" 2>/dev/null; then
         sed -i "s/^$item=.*/$item=$state/" "$STATE_FILE"
     else
         echo "$item=$state" >> "$STATE_FILE"
@@ -91,50 +105,105 @@ set_state() {
     log "Set $item to $state"
 }
 
-# Toggle mode function
-toggle_mode() {
-    local mode=$1
-    local display_name=$2
-    local enable_commands=$3
-    local disable_commands=$4
-    local current_state=$(get_state "$mode")
+# Backup current configuration
+backup_config() {
+    local timestamp=$(date '+%Y%m%d_%H%M%S')
+    local backup_file="$BACKUP_DIR/backup_$timestamp.conf"
     
-    if [ "$current_state" = "true" ]; then
-        echo -e "${YELLOW}➜ Disabling $display_name...${NC}"
-        if [ -n "$disable_commands" ]; then
-            eval "$disable_commands" 2>/dev/null || true
-        fi
-        set_state "$mode" "false"
-        echo -e "${GREEN}✓ $display_name disabled${NC}"
+    cp "$STATE_FILE" "$backup_file"
+    echo -e "${GREEN}✓ Configuration backed up to: $backup_file${NC}"
+    log "Backup created: $backup_file"
+}
+
+# Restore from backup
+restore_config() {
+    local backups=($(ls -t "$BACKUP_DIR"/backup_*.conf 2>/dev/null))
+    
+    if [ ${#backups[@]} -eq 0 ]; then
+        echo -e "${RED}✗ No backups found${NC}"
+        return 1
+    fi
+    
+    echo -e "${CYAN}Available backups:${NC}"
+    for i in "${!backups[@]}"; do
+        local date=$(basename "${backups[$i]}" | sed 's/backup_\(.*\).conf/\1/')
+        echo -e "${BLUE}[$((i+1))]${NC} $date"
+    done
+    
+    read -p "Select backup to restore (1-${#backups[@]}): " choice
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#backups[@]}" ]; then
+        cp "${backups[$((choice-1))]}" "$STATE_FILE"
+        echo -e "${GREEN}✓ Configuration restored${NC}"
+        log "Restored from backup: ${backups[$((choice-1))]}"
     else
-        echo -e "${CYAN}➜ Enabling $display_name...${NC}"
-        eval "$enable_commands" 2>/dev/null || true
-        set_state "$mode" "true"
-        echo -e "${GREEN}✓ $display_name enabled${NC}"
+        echo -e "${RED}✗ Invalid choice${NC}"
     fi
 }
 
-# Apply tweak function
-apply_tweak() {
-    local tweak=$1
-    local display_name=$2
-    local apply_commands=$3
-    local revert_commands=$4
-    local current_state=$(get_state "$tweak")
+# Check dependencies
+check_dependencies() {
+    local missing=()
     
-    if [ "$current_state" = "true" ]; then
-        echo -e "${YELLOW}➜ Reverting $display_name...${NC}"
-        if [ -n "$revert_commands" ]; then
-            eval "$revert_commands" 2>/dev/null || true
-        fi
-        set_state "$tweak" "false"
-        echo -e "${GREEN}✓ $display_name reverted${NC}"
-    else
-        echo -e "${CYAN}➜ Applying $display_name...${NC}"
-        eval "$apply_commands" 2>/dev/null || true
-        set_state "$tweak" "true"
-        echo -e "${GREEN}✓ $display_name applied${NC}"
+    # Check optional dependencies
+    command -v dunst &>/dev/null || missing+=("dunst")
+    command -v brightnessctl &>/dev/null || missing+=("brightnessctl")
+    command -v cpupower &>/dev/null || missing+=("cpupower")
+    
+    if [ ${#missing[@]} -gt 0 ]; then
+        echo -e "${YELLOW}⚠ Optional dependencies missing:${NC}"
+        printf '  - %s\n' "${missing[@]}"
+        echo -e "${CYAN}Install with: ${BOLD}sudo pacman -S ${missing[*]}${NC}"
+        echo ""
     fi
+}
+
+# Monitor system resources
+show_stats() {
+    echo -e "${CYAN}${BOLD}"
+    echo "╔════════════════════════════════════════╗"
+    echo "║        System Statistics               ║"
+    echo "╚════════════════════════════════════════╝"
+    echo -e "${NC}"
+    
+    # CPU Usage
+    local cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1)
+    echo -e "${BOLD}CPU Usage:${NC} ${cpu_usage}%"
+    
+    # CPU Frequency
+    if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq ]; then
+        local freq=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq)
+        local freq_ghz=$(echo "scale=2; $freq / 1000000" | bc)
+        echo -e "${BOLD}CPU Frequency:${NC} ${freq_ghz} GHz"
+    fi
+    
+    # CPU Governor
+    if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then
+        local governor=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor)
+        echo -e "${BOLD}CPU Governor:${NC} $governor"
+    fi
+    
+    # Memory
+    local mem_info=$(free -h | awk '/^Mem:/{printf "%s / %s (%.1f%%)", $3, $2, ($3/$2)*100}')
+    echo -e "${BOLD}Memory:${NC} $mem_info"
+    
+    # Temperature (if available)
+    if command -v sensors &>/dev/null; then
+        local temp=$(sensors | grep -i 'Package id 0' | awk '{print $4}' | head -n1)
+        [ -n "$temp" ] && echo -e "${BOLD}CPU Temp:${NC} $temp"
+    fi
+    
+    # Battery (if laptop)
+    if [ -d /sys/class/power_supply/BAT0 ]; then
+        local battery=$(cat /sys/class/power_supply/BAT0/capacity 2>/dev/null)
+        local status=$(cat /sys/class/power_supply/BAT0/status 2>/dev/null)
+        [ -n "$battery" ] && echo -e "${BOLD}Battery:${NC} ${battery}% ($status)"
+    fi
+    
+    # Disk usage
+    local disk_usage=$(df -h / | awk 'NR==2{printf "%s / %s (%s)", $3, $2, $5}')
+    echo -e "${BOLD}Disk Usage:${NC} $disk_usage"
+    
+    echo ""
 }
 
 # ============================================
@@ -142,592 +211,580 @@ apply_tweak() {
 # ============================================
 
 enable_gamemode() {
-    toggle_mode "GAMEMODE" "Gaming Mode" \
-        "systemctl --user stop dunst 2>/dev/null || true
-         echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
-         sudo sysctl -w kernel.sched_latency_ns=4000000 2>/dev/null || true
-         sudo sysctl -w kernel.sched_min_granularity_ns=500000 2>/dev/null || true" \
-        "systemctl --user start dunst 2>/dev/null || true
-         echo schedutil | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
-         sudo sysctl -w kernel.sched_latency_ns=6000000 2>/dev/null || true
-         sudo sysctl -w kernel.sched_min_granularity_ns=750000 2>/dev/null || true"
-}
-
-enable_productivity() {
-    toggle_mode "PRODUCTIVITY" "Productivity Mode" \
-        "systemctl --user start dunst 2>/dev/null || true
-         gsettings set org.gnome.desktop.session idle-delay 0 2>/dev/null || true
-         xset s off 2>/dev/null || true
-         xset -dpms 2>/dev/null || true" \
-        "gsettings set org.gnome.desktop.session idle-delay 300 2>/dev/null || true
-         xset s on 2>/dev/null || true
-         xset +dpms 2>/dev/null || true"
-}
-
-enable_powermode() {
-    toggle_mode "POWERMODE" "Power Save Mode" \
-        "echo powersave | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
-         echo 1 | sudo tee /sys/module/usbcore/parameters/autosuspend >/dev/null 2>&1 || true
-         brightnessctl set 50% 2>/dev/null || true
-         sudo powertop --auto-tune 2>/dev/null || true" \
-        "echo schedutil | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
-         echo -1 | sudo tee /sys/module/usbcore/parameters/autosuspend >/dev/null 2>&1 || true
-         brightnessctl set 100% 2>/dev/null || true"
-}
-
-enable_quietmode() {
-    toggle_mode "QUIETMODE" "Quiet Mode" \
-        "echo powersave | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
-         pactl set-sink-volume @DEFAULT_SINK@ 50% 2>/dev/null || true
-         echo 40 | sudo tee /sys/class/hwmon/hwmon*/pwm1 2>/dev/null || true" \
-        "echo schedutil | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
-         pactl set-sink-volume @DEFAULT_SINK@ 100% 2>/dev/null || true
-         echo 255 | sudo tee /sys/class/hwmon/hwmon*/pwm1 2>/dev/null || true"
-}
-
-enable_devmode() {
-    toggle_mode "DEVMODE" "Development Mode" \
-        "sudo systemctl stop packagekit 2>/dev/null || true
-         ulimit -c unlimited 2>/dev/null || true
-         sudo sysctl -w fs.inotify.max_user_watches=524288 2>/dev/null || true" \
-        "sudo systemctl start packagekit 2>/dev/null || true
-         sudo sysctl -w fs.inotify.max_user_watches=8192 2>/dev/null || true"
+    local current=$(get_state "GAMEMODE")
+    
+    if [ "$current" = "true" ]; then
+        echo -e "${YELLOW}➜ Disabling Gaming Mode...${NC}"
+        
+        # Restore normal settings
+        systemctl --user start dunst 2>/dev/null || true
+        echo schedutil | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
+        sudo sysctl -w kernel.sched_latency_ns=6000000 >/dev/null 2>&1 || true
+        sudo sysctl -w kernel.sched_min_granularity_ns=750000 >/dev/null 2>&1 || true
+        sudo sysctl -w vm.dirty_ratio=20 >/dev/null 2>&1 || true
+        
+        set_state "GAMEMODE" "false"
+        echo -e "${GREEN}✓ Gaming Mode disabled${NC}"
+    else
+        echo -e "${CYAN}➜ Enabling Gaming Mode...${NC}"
+        
+        # Disable notifications
+        systemctl --user stop dunst 2>/dev/null || true
+        
+        # Set CPU to performance
+        echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
+        
+        # Optimize scheduler for responsiveness
+        sudo sysctl -w kernel.sched_latency_ns=4000000 >/dev/null 2>&1 || true
+        sudo sysctl -w kernel.sched_min_granularity_ns=500000 >/dev/null 2>&1 || true
+        
+        # Disable swapping during gaming
+        sudo sysctl -w vm.swappiness=10 >/dev/null 2>&1 || true
+        
+        # Increase dirty ratio for better I/O
+        sudo sysctl -w vm.dirty_ratio=40 >/dev/null 2>&1 || true
+        
+        # Disable mouse acceleration (if X11)
+        if [ -n "$DISPLAY" ]; then
+            xinput list | grep -i 'pointer\|mouse' | grep -v 'XTEST' | cut -d= -f2 | cut -f1 | while read id; do
+                xinput set-prop "$id" "libinput Accel Speed" 0 2>/dev/null || true
+            done
+        fi
+        
+        set_state "GAMEMODE" "true"
+        echo -e "${GREEN}✓ Gaming Mode enabled${NC}"
+        echo -e "${CYAN}  • Notifications disabled${NC}"
+        echo -e "${CYAN}  • CPU set to performance mode${NC}"
+        echo -e "${CYAN}  • Scheduler optimized for low latency${NC}"
+        echo -e "${CYAN}  • Swapping minimized${NC}"
+    fi
 }
 
 enable_streammode() {
-    toggle_mode "STREAMMODE" "Streaming Mode" \
-        "systemctl --user stop dunst 2>/dev/null || true
-         echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
-         sudo sysctl -w net.core.rmem_max=134217728 2>/dev/null || true
-         sudo sysctl -w net.core.wmem_max=134217728 2>/dev/null || true" \
-        "systemctl --user start dunst 2>/dev/null || true
-         echo schedutil | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true"
+    local current=$(get_state "STREAMMODE")
+    
+    if [ "$current" = "true" ]; then
+        echo -e "${YELLOW}➜ Disabling Streaming Mode...${NC}"
+        
+        systemctl --user start dunst 2>/dev/null || true
+        sudo sysctl -w net.core.rmem_max=212992 >/dev/null 2>&1 || true
+        sudo sysctl -w net.core.wmem_max=212992 >/dev/null 2>&1 || true
+        
+        set_state "STREAMMODE" "false"
+        echo -e "${GREEN}✓ Streaming Mode disabled${NC}"
+    else
+        echo -e "${CYAN}➜ Enabling Streaming Mode...${NC}"
+        
+        # Disable notifications
+        systemctl --user stop dunst 2>/dev/null || true
+        
+        # Set CPU to performance
+        echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
+        
+        # Optimize network for streaming
+        sudo sysctl -w net.core.rmem_max=134217728 >/dev/null 2>&1 || true
+        sudo sysctl -w net.core.wmem_max=134217728 >/dev/null 2>&1 || true
+        sudo sysctl -w net.ipv4.tcp_rmem="4096 87380 134217728" >/dev/null 2>&1 || true
+        sudo sysctl -w net.ipv4.tcp_wmem="4096 65536 134217728" >/dev/null 2>&1 || true
+        
+        # Increase process priority for common streaming apps
+        pgrep -x obs 2>/dev/null && sudo renice -n -10 -p $(pgrep -x obs) 2>/dev/null || true
+        
+        set_state "STREAMMODE" "true"
+        echo -e "${GREEN}✓ Streaming Mode enabled${NC}"
+        echo -e "${CYAN}  • Network buffers increased${NC}"
+        echo -e "${CYAN}  • CPU optimized for encoding${NC}"
+    fi
 }
 
-# ============================================
-# TWEAK IMPLEMENTATIONS
-# ============================================
-
-tweak_swappiness() {
-    apply_tweak "SWAPPINESS" "Reduce Swappiness (10)" \
-        "sudo sysctl -w vm.swappiness=10
-         echo 'vm.swappiness=10' | sudo tee -a /etc/sysctl.d/99-archmode.conf >/dev/null" \
-        "sudo sysctl -w vm.swappiness=60
-         sudo sed -i '/vm.swappiness=10/d' /etc/sysctl.d/99-archmode.conf 2>/dev/null || true"
+enable_productivity() {
+    local current=$(get_state "PRODUCTIVITY")
+    
+    if [ "$current" = "true" ]; then
+        echo -e "${YELLOW}➜ Disabling Productivity Mode...${NC}"
+        
+        gsettings set org.gnome.desktop.session idle-delay 300 2>/dev/null || true
+        xset s on 2>/dev/null || true
+        xset +dpms 2>/dev/null || true
+        
+        set_state "PRODUCTIVITY" "false"
+        echo -e "${GREEN}✓ Productivity Mode disabled${NC}"
+    else
+        echo -e "${CYAN}➜ Enabling Productivity Mode...${NC}"
+        
+        # Enable notifications
+        systemctl --user start dunst 2>/dev/null || true
+        
+        # Prevent screen sleep
+        gsettings set org.gnome.desktop.session idle-delay 0 2>/dev/null || true
+        xset s off 2>/dev/null || true
+        xset -dpms 2>/dev/null || true
+        
+        # Block distracting websites (optional)
+        if command -v hostctl &>/dev/null; then
+            echo -e "${CYAN}  • To block distracting sites, edit /etc/hosts${NC}"
+        fi
+        
+        set_state "PRODUCTIVITY" "true"
+        echo -e "${GREEN}✓ Productivity Mode enabled${NC}"
+        echo -e "${CYAN}  • Screen sleep disabled${NC}"
+        echo -e "${CYAN}  • Notifications enabled${NC}"
+    fi
 }
 
-tweak_noatime() {
-    apply_tweak "NOATIME" "Disable Access Time" \
-        "echo 'Add noatime to /etc/fstab manually for your partitions'
-         echo 'Example: UUID=xxx / ext4 defaults,noatime 0 1'" \
-        "echo 'Remove noatime from /etc/fstab manually'"
+enable_powermode() {
+    local current=$(get_state "POWERMODE")
+    
+    if [ "$current" = "true" ]; then
+        echo -e "${YELLOW}➜ Disabling Power Save Mode...${NC}"
+        
+        echo schedutil | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
+        echo -1 | sudo tee /sys/module/usbcore/parameters/autosuspend >/dev/null 2>&1 || true
+        brightnessctl set 100% 2>/dev/null || true
+        sudo sysctl -w vm.laptop_mode=0 >/dev/null 2>&1 || true
+        
+        set_state "POWERMODE" "false"
+        echo -e "${GREEN}✓ Power Save Mode disabled${NC}"
+    else
+        echo -e "${CYAN}➜ Enabling Power Save Mode...${NC}"
+        
+        # Set CPU to powersave
+        echo powersave | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
+        
+        # Enable aggressive USB suspend
+        echo 1 | sudo tee /sys/module/usbcore/parameters/autosuspend >/dev/null 2>&1 || true
+        
+        # Dim screen
+        brightnessctl set 50% 2>/dev/null || true
+        
+        # Enable laptop mode
+        sudo sysctl -w vm.laptop_mode=5 >/dev/null 2>&1 || true
+        
+        # Reduce screen refresh rate (if possible)
+        if command -v xrandr &>/dev/null && [ -n "$DISPLAY" ]; then
+            xrandr --output $(xrandr | grep " connected" | cut -d" " -f1 | head -n1) --rate 60 2>/dev/null || true
+        fi
+        
+        # Stop unnecessary services
+        systemctl --user stop tracker-miner-fs-3.service 2>/dev/null || true
+        
+        set_state "POWERMODE" "true"
+        echo -e "${GREEN}✓ Power Save Mode enabled${NC}"
+        echo -e "${CYAN}  • CPU set to powersave${NC}"
+        echo -e "${CYAN}  • Screen dimmed to 50%${NC}"
+        echo -e "${CYAN}  • USB autosuspend enabled${NC}"
+    fi
 }
 
-tweak_tcpcongestion() {
-    apply_tweak "TCPCONGESTION" "Optimize TCP (BBR)" \
-        "sudo modprobe tcp_bbr
-         echo 'tcp_bbr' | sudo tee /etc/modules-load.d/bbr.conf >/dev/null
-         sudo sysctl -w net.ipv4.tcp_congestion_control=bbr
-         sudo sysctl -w net.core.default_qdisc=fq
-         echo 'net.ipv4.tcp_congestion_control=bbr' | sudo tee -a /etc/sysctl.d/99-archmode.conf >/dev/null
-         echo 'net.core.default_qdisc=fq' | sudo tee -a /etc/sysctl.d/99-archmode.conf >/dev/null" \
-        "sudo sysctl -w net.ipv4.tcp_congestion_control=cubic
-         sudo rm /etc/modules-load.d/bbr.conf 2>/dev/null || true
-         sudo sed -i '/net.ipv4.tcp_congestion_control=bbr/d' /etc/sysctl.d/99-archmode.conf 2>/dev/null || true
-         sudo sed -i '/net.core.default_qdisc=fq/d' /etc/sysctl.d/99-archmode.conf 2>/dev/null || true"
+enable_quietmode() {
+    local current=$(get_state "QUIETMODE")
+    
+    if [ "$current" = "true" ]; then
+        echo -e "${YELLOW}➜ Disabling Quiet Mode...${NC}"
+        
+        echo schedutil | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
+        pactl set-sink-volume @DEFAULT_SINK@ 100% 2>/dev/null || true
+        echo 255 | sudo tee /sys/class/hwmon/hwmon*/pwm1 2>/dev/null || true
+        
+        set_state "QUIETMODE" "false"
+        echo -e "${GREEN}✓ Quiet Mode disabled${NC}"
+    else
+        echo -e "${CYAN}➜ Enabling Quiet Mode...${NC}"
+        
+        # Reduce CPU frequency
+        echo powersave | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
+        
+        # Reduce volume
+        pactl set-sink-volume @DEFAULT_SINK@ 50% 2>/dev/null || true
+        
+        # Reduce fan speed (if controllable)
+        echo 40 | sudo tee /sys/class/hwmon/hwmon*/pwm1 2>/dev/null || true
+        
+        set_state "QUIETMODE" "true"
+        echo -e "${GREEN}✓ Quiet Mode enabled${NC}"
+        echo -e "${CYAN}  • CPU frequency reduced${NC}"
+        echo -e "${CYAN}  • Volume lowered to 50%${NC}"
+        echo -e "${CYAN}  • Fan speed reduced${NC}"
+    fi
 }
 
-tweak_ioscheduler() {
-    apply_tweak "IOSCHEDULER" "Set I/O Scheduler (BFQ)" \
-        "for dev in /sys/block/sd*/queue/scheduler; do
-             echo bfq | sudo tee \$dev >/dev/null 2>&1 || true
-         done
-         echo 'KERNEL==\"sd[a-z]*\", ATTR{queue/scheduler}=\"bfq\"' | sudo tee /etc/udev/rules.d/60-ioschedulers.rules >/dev/null" \
-        "sudo rm /etc/udev/rules.d/60-ioschedulers.rules 2>/dev/null || true
-         sudo udevadm control --reload-rules"
+enable_devmode() {
+    local current=$(get_state "DEVMODE")
+    
+    if [ "$current" = "true" ]; then
+        echo -e "${YELLOW}➜ Disabling Development Mode...${NC}"
+        
+        sudo systemctl start packagekit 2>/dev/null || true
+        sudo sysctl -w fs.inotify.max_user_watches=8192 >/dev/null 2>&1 || true
+        ulimit -c 0 2>/dev/null || true
+        
+        set_state "DEVMODE" "false"
+        echo -e "${GREEN}✓ Development Mode disabled${NC}"
+    else
+        echo -e "${CYAN}➜ Enabling Development Mode...${NC}"
+        
+        # Disable package manager
+        sudo systemctl stop packagekit 2>/dev/null || true
+        
+        # Increase file watchers for IDEs
+        sudo sysctl -w fs.inotify.max_user_watches=524288 >/dev/null 2>&1 || true
+        
+        # Unlimited core dumps
+        ulimit -c unlimited 2>/dev/null || true
+        
+        # Increase shared memory
+        sudo sysctl -w kernel.shmmax=68719476736 >/dev/null 2>&1 || true
+        
+        set_state "DEVMODE" "true"
+        echo -e "${GREEN}✓ Development Mode enabled${NC}"
+        echo -e "${CYAN}  • File watchers increased (IDEs)${NC}"
+        echo -e "${CYAN}  • Core dumps enabled${NC}"
+        echo -e "${CYAN}  • Shared memory increased${NC}"
+    fi
 }
 
-tweak_zram() {
-    apply_tweak "ZRAM" "Enable ZRAM" \
-        "if ! command -v zramctl &> /dev/null; then
-             echo 'Installing zram-generator...'
-             sudo pacman -S --noconfirm zram-generator 2>/dev/null || true
-         fi
-         sudo modprobe zram
-         sudo systemctl enable --now systemd-zram-setup@zram0.service 2>/dev/null || true" \
-        "sudo systemctl disable --now systemd-zram-setup@zram0.service 2>/dev/null || true
-         sudo modprobe -r zram 2>/dev/null || true"
+enable_nightmode() {
+    local current=$(get_state "NIGHTMODE")
+    
+    if [ "$current" = "true" ]; then
+        echo -e "${YELLOW}➜ Disabling Night Mode...${NC}"
+        
+        # Restore color temperature
+        redshift -x 2>/dev/null || true
+        brightnessctl set 100% 2>/dev/null || true
+        pactl set-sink-volume @DEFAULT_SINK@ 100% 2>/dev/null || true
+        
+        set_state "NIGHTMODE" "false"
+        echo -e "${GREEN}✓ Night Mode disabled${NC}"
+    else
+        echo -e "${CYAN}➜ Enabling Night Mode...${NC}"
+        
+        # Reduce blue light
+        if command -v redshift &>/dev/null; then
+            redshift -O 3400 2>/dev/null || true
+            echo -e "${CYAN}  • Blue light reduced (3400K)${NC}"
+        else
+            echo -e "${YELLOW}  ⚠ Install redshift for blue light reduction${NC}"
+        fi
+        
+        # Dim screen
+        brightnessctl set 30% 2>/dev/null || true
+        
+        # Lower volume
+        pactl set-sink-volume @DEFAULT_SINK@ 40% 2>/dev/null || true
+        
+        # Enable quiet mode too
+        enable_quietmode
+        
+        set_state "NIGHTMODE" "true"
+        echo -e "${GREEN}✓ Night Mode enabled${NC}"
+        echo -e "${CYAN}  • Screen dimmed to 30%${NC}"
+        echo -e "${CYAN}  • Volume lowered${NC}"
+    fi
 }
 
-tweak_earlyoom() {
-    apply_tweak "EARLYOOM" "Enable Early OOM Killer" \
-        "if ! command -v earlyoom &> /dev/null; then
-             echo 'Installing earlyoom...'
-             sudo pacman -S --noconfirm earlyoom 2>/dev/null || true
-         fi
-         sudo systemctl enable --now earlyoom 2>/dev/null || true" \
-        "sudo systemctl disable --now earlyoom 2>/dev/null || true"
+enable_travelmode() {
+    local current=$(get_state "TRAVELMODE")
+    
+    if [ "$current" = "true" ]; then
+        echo -e "${YELLOW}➜ Disabling Travel Mode...${NC}"
+        
+        # Restore normal settings
+        echo schedutil | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
+        sudo systemctl start bluetooth 2>/dev/null || true
+        sudo rfkill unblock wifi 2>/dev/null || true
+        brightnessctl set 100% 2>/dev/null || true
+        
+        set_state "TRAVELMODE" "false"
+        echo -e "${GREEN}✓ Travel Mode disabled${NC}"
+    else
+        echo -e "${CYAN}➜ Enabling Travel Mode...${NC}"
+        
+        # Maximum power saving
+        enable_powermode
+        
+        # Disable Bluetooth
+        sudo systemctl stop bluetooth 2>/dev/null || true
+        
+        # Reduce WiFi power
+        if command -v iw &>/dev/null; then
+            for dev in /sys/class/net/wl*/device; do
+                [ -e "$dev" ] && sudo iw dev $(basename $(dirname $dev)) set power_save on 2>/dev/null || true
+            done
+        fi
+        
+        # Extremely dim screen
+        brightnessctl set 20% 2>/dev/null || true
+        
+        set_state "TRAVELMODE" "true"
+        echo -e "${GREEN}✓ Travel Mode enabled${NC}"
+        echo -e "${CYAN}  • Maximum battery optimization${NC}"
+        echo -e "${CYAN}  • Bluetooth disabled${NC}"
+        echo -e "${CYAN}  • WiFi power saving enabled${NC}"
+    fi
 }
 
-tweak_preload() {
-    apply_tweak "PRELOAD" "Enable Preload" \
-        "if ! command -v preload &> /dev/null; then
-             echo 'Installing preload from AUR...'
-             echo 'Please install manually: yay -S preload'
-         fi
-         sudo systemctl enable --now preload 2>/dev/null || true" \
-        "sudo systemctl disable --now preload 2>/dev/null || true"
+enable_rendermode() {
+    local current=$(get_state "RENDERMODE")
+    
+    if [ "$current" = "true" ]; then
+        echo -e "${YELLOW}➜ Disabling Render Mode...${NC}"
+        
+        echo schedutil | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
+        sudo systemctl start thermald 2>/dev/null || true
+        
+        set_state "RENDERMODE" "false"
+        echo -e "${GREEN}✓ Render Mode disabled${NC}"
+    else
+        echo -e "${CYAN}➜ Enabling Render Mode...${NC}"
+        
+        # Maximum CPU performance
+        echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
+        
+        # Disable CPU frequency scaling for consistency
+        for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq; do
+            [ -f "$cpu" ] && sudo cat "$cpu" | sudo tee "${cpu/max/min}" >/dev/null 2>&1 || true
+        done
+        
+        # Disable thermal throttling temporarily (use with caution!)
+        sudo systemctl stop thermald 2>/dev/null || true
+        
+        # Increase nice level for rendering processes
+        pgrep -x blender 2>/dev/null && sudo renice -n -20 -p $(pgrep -x blender) 2>/dev/null || true
+        
+        set_state "RENDERMODE" "true"
+        echo -e "${GREEN}✓ Render Mode enabled${NC}"
+        echo -e "${CYAN}  • CPU locked to maximum frequency${NC}"
+        echo -e "${CYAN}  • Thermal throttling disabled${NC}"
+        echo -e "${YELLOW}  ⚠ Monitor temperatures closely!${NC}"
+    fi
 }
 
-tweak_irqbalance() {
-    apply_tweak "IRQBALANCE" "Enable IRQ Balance" \
-        "if ! command -v irqbalance &> /dev/null; then
-             echo 'Installing irqbalance...'
-             sudo pacman -S --noconfirm irqbalance 2>/dev/null || true
-         fi
-         sudo systemctl enable --now irqbalance 2>/dev/null || true" \
-        "sudo systemctl disable --now irqbalance 2>/dev/null || true"
+# Profile management
+apply_profile() {
+    local profile=$1
+    
+    # Find profile in config
+    local profile_line=$(grep "^$profile:" "$PROFILES_FILE" 2>/dev/null)
+    
+    if [ -z "$profile_line" ]; then
+        echo -e "${RED}✗ Profile '$profile' not found${NC}"
+        return 1
+    fi
+    
+    local modes=$(echo "$profile_line" | cut -d: -f2)
+    local description=$(echo "$profile_line" | cut -d: -f3)
+    
+    echo -e "${CYAN}➜ Applying profile: ${BOLD}$profile${NC}"
+    echo -e "${CYAN}  $description${NC}"
+    echo ""
+    
+    # Split modes and enable each
+    IFS=',' read -ra MODE_ARRAY <<< "$modes"
+    for mode in "${MODE_ARRAY[@]}"; do
+        case "$mode" in
+            GAMEMODE) enable_gamemode ;;
+            STREAMMODE) enable_streammode ;;
+            PRODUCTIVITY) enable_productivity ;;
+            POWERMODE) enable_powermode ;;
+            QUIETMODE) enable_quietmode ;;
+            DEVMODE) enable_devmode ;;
+            NIGHTMODE) enable_nightmode ;;
+            TRAVELMODE) enable_travelmode ;;
+            RENDERMODE) enable_rendermode ;;
+        esac
+    done
+    
+    echo -e "${GREEN}✓ Profile applied successfully${NC}"
 }
 
-# ============================================
-# DISPLAY FUNCTIONS
-# ============================================
-
+# Show status
 show_status() {
     echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║           ArchMode Status              ║"
+    echo "║          ArchMode Status               ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
     
-    echo -e "${BOLD}${BLUE}Modes:${NC}"
-    while IFS=: read -r mode_name display_name default_state; do
+    while IFS=: read -r mode_name display_name category description; do
         [[ "$mode_name" =~ ^#.*$ ]] && continue
         [[ -z "$mode_name" ]] && continue
         
         local state=$(get_state "$mode_name")
         if [ "$state" = "true" ]; then
-            echo -e "${GREEN}  ✓${NC} $display_name: ${GREEN}${BOLD}ENABLED${NC}"
+            echo -e "${GREEN}✓${NC} ${BOLD}$display_name${NC} ${GREEN}[ENABLED]${NC}"
         else
-            echo -e "${RED}  ✗${NC} $display_name: ${RED}DISABLED${NC}"
+            echo -e "${RED}✗${NC} ${BOLD}$display_name${NC} ${RED}[DISABLED]${NC}"
         fi
     done < "$MODES_FILE"
-    
-    echo ""
-    echo -e "${BOLD}${MAGENTA}Tweaks:${NC}"
-    while IFS=: read -r tweak_name display_name default_state; do
-        [[ "$tweak_name" =~ ^#.*$ ]] && continue
-        [[ -z "$tweak_name" ]] && continue
-        
-        local state=$(get_state "$tweak_name")
-        if [ "$state" = "true" ]; then
-            echo -e "${GREEN}  ✓${NC} $display_name: ${GREEN}${BOLD}APPLIED${NC}"
-        else
-            echo -e "${RED}  ✗${NC} $display_name: ${RED}NOT APPLIED${NC}"
-        fi
-    done < "$TWEAKS_FILE"
     echo ""
 }
 
+# List modes
 list_modes() {
     echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║         Available Modes                ║"
+    echo "║        Available Modes                 ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
     
-    while IFS=: read -r mode_name display_name default_state; do
+    local current_category=""
+    while IFS=: read -r mode_name display_name category description; do
         [[ "$mode_name" =~ ^#.*$ ]] && continue
         [[ -z "$mode_name" ]] && continue
         
-        echo -e "${CYAN}➜${NC} ${BOLD}$mode_name${NC} - $display_name"
+        if [ "$category" != "$current_category" ]; then
+            echo -e "${MAGENTA}${BOLD}$category:${NC}"
+            current_category="$category"
+        fi
+        
+        echo -e "  ${CYAN}➜${NC} ${BOLD}$mode_name${NC} - $display_name"
+        echo -e "    ${description}"
     done < "$MODES_FILE"
     echo ""
 }
 
-list_tweaks() {
+# List profiles
+list_profiles() {
     echo -e "${MAGENTA}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║        Available Tweaks                ║"
+    echo "║       Available Profiles               ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
     
-    while IFS=: read -r tweak_name display_name default_state; do
-        [[ "$tweak_name" =~ ^#.*$ ]] && continue
-        [[ -z "$tweak_name" ]] && continue
+    while IFS=: read -r profile_name modes description; do
+        [[ "$profile_name" =~ ^#.*$ ]] && continue
+        [[ -z "$profile_name" ]] && continue
         
-        echo -e "${MAGENTA}➜${NC} ${BOLD}$tweak_name${NC} - $display_name"
-    done < "$TWEAKS_FILE"
-    echo ""
+        echo -e "${MAGENTA}➜${NC} ${BOLD}$profile_name${NC}"
+        echo -e "  ${description}"
+        echo -e "  ${CYAN}Modes: $modes${NC}"
+        echo ""
+    done < "$PROFILES_FILE"
 }
 
-show_version() {
-    echo -e "${CYAN}${BOLD}"
-    echo "╔════════════════════════════════════════╗"
-    echo "║             ArchMode v$VERSION           ║"
-    echo "╚════════════════════════════════════════╝"
-    echo -e "${NC}"
-    echo ""
-    echo -e "${CYAN}A powerful system mode manager for Arch Linux${NC}"
-    echo -e "${CYAN}Created by theofficalnoodles${NC}"
-    echo ""
-}
-
+# Reset all
 reset_all() {
     echo -e "${YELLOW}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║          Resetting Everything          ║"
+    echo "║          Reset All Modes               ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
-    echo ""
-    
-    # Reset modes
-    while IFS=: read -r mode_name display_name default_state; do
+
+    read -p "Are you sure you want to disable ALL modes? (y/N): " confirm
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        echo -e "${CYAN}➜ Reset cancelled${NC}"
+        return
+    fi
+
+    backup_config
+
+    while IFS=: read -r mode_name _; do
         [[ "$mode_name" =~ ^#.*$ ]] && continue
         [[ -z "$mode_name" ]] && continue
-        
-        local state=$(get_state "$mode_name")
-        if [ "$state" = "true" ]; then
-            echo -e "${YELLOW}➜ Disabling $display_name...${NC}"
-            set_state "$mode_name" "false"
-        fi
+        set_state "$mode_name" "false"
     done < "$MODES_FILE"
-    
-    # Restore default settings
+
     echo schedutil | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
     systemctl --user start dunst 2>/dev/null || true
-    
-    echo ""
-    echo -e "${GREEN}✓ All modes and tweaks reset${NC}"
-    log "All reset"
+    brightnessctl set 100% 2>/dev/null || true
+    pactl set-sink-volume @DEFAULT_SINK@ 100% 2>/dev/null || true
+    sudo systemctl start thermald 2>/dev/null || true
+    sudo systemctl start bluetooth 2>/dev/null || true
+    sudo rfkill unblock wifi 2>/dev/null || true
+
+    echo -e "${GREEN}✓ All modes have been reset to defaults${NC}"
 }
 
-update_archmode() {
-    echo -e "${CYAN}${BOLD}"
-    echo "╔════════════════════════════════════════╗"
-    echo "║         ArchMode Update Utility        ║"
-    echo "╚════════════════════════════════════════╝"
-    echo -e "${NC}"
-    echo ""
-    
-    if ! command -v git &> /dev/null; then
-        echo -e "${RED}✗ Git is not installed!${NC}"
-        echo -e "${YELLOW}➜ Install git: sudo pacman -S git${NC}"
-        exit 1
-    fi
-    
-    TEMP_DIR=$(mktemp -d)
-    echo -e "${CYAN}➜ Downloading latest version...${NC}"
-    
-    if git clone https://github.com/theofficalnoodles/ArchMode.git "$TEMP_DIR" &>/dev/null; then
-        echo -e "${GREEN}✓ Downloaded successfully${NC}"
-        echo ""
-        
-        cd "$TEMP_DIR"
-        chmod +x install.sh
-        ./install.sh
-        
-        cd - > /dev/null
-        rm -rf "$TEMP_DIR"
-    else
-        echo -e "${RED}✗ Failed to download update${NC}"
-        echo -e "${YELLOW}➜ Check your internet connection${NC}"
-        rm -rf "$TEMP_DIR"
-        exit 1
-    fi
-}
-
+# Help / usage
 show_help() {
     echo -e "${CYAN}${BOLD}"
-    echo "╔════════════════════════════════════════╗"
-    echo "║          ArchMode Help Menu            ║"
-    echo "╚════════════════════════════════════════╝"
+    echo "ArchMode v$VERSION - System Mode Manager for Arch Linux"
     echo -e "${NC}"
+    echo "Usage: archmode <command> [argument]"
     echo ""
-    echo -e "${BOLD}Usage:${NC}"
-    echo "  archmode [command] [mode/tweak]"
-    echo ""
-    echo -e "${BOLD}Mode Commands:${NC}"
-    echo "  on, enable      Enable a mode"
-    echo "  off, disable    Disable a mode"
-    echo "  list            List all available modes"
-    echo ""
-    echo -e "${BOLD}Tweak Commands:${NC}"
-    echo "  tweak           Apply a system tweak"
-    echo "  untweak         Revert a system tweak"
-    echo "  tweaks          List all available tweaks"
-    echo ""
-    echo -e "${BOLD}General Commands:${NC}"
-    echo "  status          Show current status"
-    echo "  reset           Reset all modes and tweaks"
-    echo "  update          Update ArchMode"
-    echo "  version         Show version"
-    echo "  help            Show this help"
-    echo ""
-    echo -e "${BOLD}Available Modes:${NC}"
-    echo "  GAMEMODE        Gaming optimization"
-    echo "  PRODUCTIVITY    Stay focused"
-    echo "  POWERMODE       Power saving"
-    echo "  QUIETMODE       Reduce noise"
-    echo "  DEVMODE         Development"
-    echo "  STREAMMODE      Streaming/recording"
-    echo ""
-    echo -e "${BOLD}Available Tweaks:${NC}"
-    echo "  SWAPPINESS      Reduce swap usage"
-    echo "  NOATIME         Disable access time"
-    echo "  TCPCONGESTION   Enable BBR"
-    echo "  IOSCHEDULER     Set BFQ scheduler"
-    echo "  ZRAM            Enable ZRAM"
-    echo "  EARLYOOM        Early OOM killer"
-    echo "  PRELOAD         Application preloader"
-    echo "  IRQBALANCE      Balance IRQ"
+    echo -e "${BOLD}Commands:${NC}"
+    echo "  status                 Show current mode status"
+    echo "  stats                  Show live system statistics"
+    echo "  modes                  List available modes"
+    echo "  profiles               List available profiles"
+    echo "  enable <MODE>           Toggle a specific mode"
+    echo "  profile <PROFILE>       Apply a profile"
+    echo "  reset                  Disable all modes"
+    echo "  backup                 Backup current state"
+    echo "  restore                Restore a backup"
+    echo "  detect                 Detect system hardware"
+    echo "  help                   Show this help message"
     echo ""
     echo -e "${BOLD}Examples:${NC}"
-    echo "  archmode on GAMEMODE"
-    echo "  archmode tweak SWAPPINESS"
-    echo "  archmode status"
-    echo "  archmode update"
-    echo ""
-}
-
-interactive_mode() {
-    while true; do
-        clear
-        echo -e "${CYAN}${BOLD}"
-        echo "╔════════════════════════════════════════╗"
-        echo "║            ArchMode Manager            ║"
-        echo "║               v$VERSION                  ║"
-        echo "╚════════════════════════════════════════╝"
-        echo -e "${NC}"
-        echo ""
-        
-        echo -e "${BLUE}${BOLD}=== MODES ===${NC}"
-        local i=1
-        declare -A item_map
-        
-        while IFS=: read -r mode_name display_name default_state; do
-            [[ "$mode_name" =~ ^#.*$ ]] && continue
-            [[ -z "$mode_name" ]] && continue
-            
-            local state=$(get_state "$mode_name")
-            item_map[$i]="MODE:$mode_name"
-            
-            if [ "$state" = "true" ]; then
-                echo -e "${GREEN}[$i]${NC} $display_name ${GREEN}[ON]${NC}"
-            else
-                echo -e "${BLUE}[$i]${NC} $display_name ${RED}[OFF]${NC}"
-            fi
-            ((i++))
-        done < "$MODES_FILE"
-        
-        echo ""
-        echo -e "${MAGENTA}${BOLD}=== TWEAKS ===${NC}"
-        
-        while IFS=: read -r tweak_name display_name default_state; do
-            [[ "$tweak_name" =~ ^#.*$ ]] && continue
-            [[ -z "$tweak_name" ]] && continue
-            
-            local state=$(get_state "$tweak_name")
-            item_map[$i]="TWEAK:$tweak_name"
-            
-            if [ "$state" = "true" ]; then
-                echo -e "${GREEN}[$i]${NC} $display_name ${GREEN}[APPLIED]${NC}"
-            else
-                echo -e "${MAGENTA}[$i]${NC} $display_name ${RED}[NOT APPLIED]${NC}"
-            fi
-            ((i++))
-        done < "$TWEAKS_FILE"
-        
-        echo ""
-        echo -e "${YELLOW}[r]${NC} Reset all"
-        echo -e "${YELLOW}[u]${NC} Update"
-        echo -e "${YELLOW}[v]${NC} Version"
-        echo -e "${YELLOW}[q]${NC} Quit"
-        echo ""
-        read -p "Select option: " -n 1 -r choice
-        echo ""
-        
-        case $choice in
-            [1-9]|1[0-4])
-                if [ -n "${item_map[$choice]:-}" ]; then
-                    local item_type=$(echo "${item_map[$choice]}" | cut -d: -f1)
-                    local item_name=$(echo "${item_map[$choice]}" | cut -d: -f2)
-                    
-                    if [ "$item_type" = "MODE" ]; then
-                        case $item_name in
-                            GAMEMODE) enable_gamemode ;;
-                            PRODUCTIVITY) enable_productivity ;;
-                            POWERMODE) enable_powermode ;;
-                            QUIETMODE) enable_quietmode ;;
-                            DEVMODE) enable_devmode ;;
-                            STREAMMODE) enable_streammode ;;
-                        esac
-                    else
-                        case $item_name in
-                            SWAPPINESS) tweak_swappiness ;;
-                            NOATIME) tweak_noatime ;;
-                            TCPCONGESTION) tweak_tcpcongestion ;;
-                            IOSCHEDULER) tweak_ioscheduler ;;
-                            ZRAM) tweak_zram ;;
-                            EARLYOOM) tweak_earlyoom ;;
-                            PRELOAD) tweak_preload ;;
-                            IRQBALANCE) tweak_irqbalance ;;
-                        esac
-                    fi
-                    sleep 2
-                fi
-                ;;
-            r|R)
-                reset_all
-                sleep 2
-                ;;
-            u|U)
-                update_archmode
-                exit 0
-                ;;
-            v|V)
-                show_version
-                sleep 3
-                ;;
-            q|Q)
-                echo -e "${GREEN}Goodbye!${NC}"
-                exit 0
-                ;;
-            *)
-                echo -e "${RED}Invalid option${NC}"
-                sleep 1
-                ;;
-        esac
-    done
+    echo "  archmode enable GAMEMODE"
+    echo "  archmode profile GAMER"
+    echo "  archmode reset"
 }
 
 # ============================================
-# MAIN SCRIPT LOGIC
+# Argument parsing
 # ============================================
 
-case "${1:-}" in
-    on|enable)
-        if [ -z "${2:-}" ]; then
-            echo -e "${RED}Error: No mode specified${NC}"
-            exit 1
-        fi
-        
-        case "${2^^}" in
-            GAMEMODE) enable_gamemode ;;
-            PRODUCTIVITY) enable_productivity ;;
-            POWERMODE) enable_powermode ;;
-            QUIETMODE) enable_quietmode ;;
-            DEVMODE) enable_devmode ;;
-            STREAMMODE) enable_streammode ;;
-            *)
-                echo -e "${RED}Unknown mode: $2${NC}"
-                exit 1
-                ;;
-        esac
-        ;;
-        
-    off|disable)
-        if [ -z "${2:-}" ]; then
-            echo -e "${RED}Error: No mode specified${NC}"
-            exit 1
-        fi
-        
-        case "${2^^}" in
-            GAMEMODE) enable_gamemode ;;
-            PRODUCTIVITY) enable_productivity ;;
-            POWERMODE) enable_powermode ;;
-            QUIETMODE) enable_quietmode ;;
-            DEVMODE) enable_devmode ;;
-            STREAMMODE) enable_streammode ;;
-            *)
-                echo -e "${RED}Unknown mode: $2${NC}"
-                exit 1
-                ;;
-        esac
-        ;;
-        
-    tweak)
-        if [ -z "${2:-}" ]; then
-            echo -e "${RED}Error: No tweak specified${NC}"
-            exit 1
-        fi
-        
-        case "${2^^}" in
-            SWAPPINESS) tweak_swappiness ;;
-            NOATIME) tweak_noatime ;;
-            TCPCONGESTION) tweak_tcpcongestion ;;
-            IOSCHEDULER) tweak_ioscheduler ;;
-            ZRAM) tweak_zram ;;
-            EARLYOOM) tweak_earlyoom ;;
-            PRELOAD) tweak_preload ;;
-            IRQBALANCE) tweak_irqbalance ;;
-            *)
-                echo -e "${RED}Unknown tweak: $2${NC}"
-                exit 1
-                ;;
-        esac
-        ;;
-        
-    untweak)
-        if [ -z "${2:-}" ]; then
-            echo -e "${RED}Error: No tweak specified${NC}"
-            exit 1
-        fi
-        
-        case "${2^^}" in
-            SWAPPINESS) tweak_swappiness ;;
-            NOATIME) tweak_noatime ;;
-            TCPCONGESTION) tweak_tcpcongestion ;;
-            IOSCHEDULER) tweak_ioscheduler ;;
-            ZRAM) tweak_zram ;;
-            EARLYOOM) tweak_earlyoom ;;
-            PRELOAD) tweak_preload ;;
-            IRQBALANCE) tweak_irqbalance ;;
-            *)
-                echo -e "${RED}Unknown tweak: $2${NC}"
-                exit 1
-                ;;
-        esac
-        ;;
-        
+command="${1:-help}"
+argument="${2:-}"
+
+case "$command" in
     status)
         show_status
         ;;
-        
-    list)
+    stats)
+        show_stats
+        ;;
+    modes)
         list_modes
         ;;
-        
-    tweaks)
-        list_tweaks
+    profiles)
+        list_profiles
         ;;
-        
+    enable)
+        case "$argument" in
+            GAMEMODE) enable_gamemode ;;
+            STREAMMODE) enable_streammode ;;
+            PRODUCTIVITY) enable_productivity ;;
+            POWERMODE) enable_powermode ;;
+            QUIETMODE) enable_quietmode ;;
+            DEVMODE) enable_devmode ;;
+            NIGHTMODE) enable_nightmode ;;
+            TRAVELMODE) enable_travelmode ;;
+            RENDERMODE) enable_rendermode ;;
+            *)
+                echo -e "${RED}✗ Unknown mode: $argument${NC}"
+                echo "Use: archmode modes"
+                exit 1
+                ;;
+        esac
+        ;;
+    profile)
+        apply_profile "$argument"
+        ;;
     reset)
         reset_all
         ;;
-        
-    update)
-        update_archmode
+    backup)
+        backup_config
         ;;
-
-    version)
-        show_version
+    restore)
+        restore_config
         ;;
-
+    detect)
+        detect_system
+        echo -e "${GREEN}✓ System information detected${NC}"
+        ;;
     help|--help|-h)
         show_help
         ;;
-
-    "")
-        interactive_mode
-        ;;
-
     *)
-        echo -e "${RED}Unknown command: ${1:-}${NC}"
-        show_help
+        echo -e "${RED}✗ Unknown command: $command${NC}"
+        echo "Use: archmode help"
         exit 1
         ;;
 esac
