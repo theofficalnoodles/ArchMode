@@ -193,24 +193,28 @@ backup_config() {
 # Restore from backup
 restore_config() {
     local backups=($(ls -t "$BACKUP_DIR"/backup_*.conf 2>/dev/null))
-
-    if [ ${#backups[@]} -eq 0 ]; then
+    local backup_count=${#backups[@]}
+    
+    if [ "$backup_count" -eq 0 ]; then
         echo -e "${RED}✗ No backups found${NC}"
         return 1
     fi
-
+    
     echo -e "${CYAN}Available backups:${NC}"
     for i in "${!backups[@]}"; do
         local date=$(basename "${backups[$i]}" | sed 's/backup_\(.*\).conf/\1/')
         echo -e "${BLUE}[$((i+1))]${NC} $date"
     done
-
-    read -p "Select backup to restore (1-${#backups[@]}): " choice
-    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#backups[@]}" ]; then
-        cp "${backups[$((choice-1))]}" "$STATE_FILE"
+    
+    read -p "Select backup to restore (1-$backup_count): " choice
+    
+    # Check if choice is a number and within range
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$backup_count" ]; then
+        local index=$((choice-1))
+        cp "${backups[$index]}" "$STATE_FILE"
         STATE_CACHE_LOADED=false  # Invalidate cache
         echo -e "${GREEN}✓ Configuration restored${NC}"
-        log "Restored from backup: ${backups[$((choice-1))]}"
+        log "Restored from backup: ${backups[$index]}"
     else
         echo -e "${RED}✗ Invalid choice${NC}"
     fi
