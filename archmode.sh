@@ -488,9 +488,8 @@ DRY_RUN=false
 dry_run_mode() {
     local mode=$1
 
-    echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║        Dry Run - $mode"                ║"
+  printf "║        Dry Run - %-23s ║\n" "$mode"    
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
