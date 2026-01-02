@@ -1387,7 +1387,9 @@ case "$mode" in
     RENDERMODE) enable_rendermode ;;
     ULTIMATE) enable_ultimatemode ;;
     *)
-        echo -e "${RED}✗ Unknown mode: $mode${NC}"
-        return 1
-        ;;
-esac
+        echo -e "${CYAN}  • Network: Maximum throughput and low latency${NC}"
+        echo -e "${CYAN}  • IRQ balancing: Fully optimized${NC}"
+        echo -e "${CYAN}  • Thermals: Throttling disabled${NC}"
+        echo -e "${RED}${BOLD}  ⚠ WARNING: This mode can damage hardware if cooling is insufficient!${NC}"
+    fi
+}
