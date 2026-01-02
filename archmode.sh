@@ -26,7 +26,7 @@ PROFILES_FILE="$CONFIG_DIR/profiles.conf"
 BACKUP_DIR="$CONFIG_DIR/backups"
 PLUGINS_DIR="/usr/lib/archmode/plugins"
 HOOKS_DIR="/etc/archmode/hooks"
-VERSION="1.1.0"
+VERSION="0.9.0"
 
 # Performance: Cache state in memory
 declare -A STATE_CACHE
