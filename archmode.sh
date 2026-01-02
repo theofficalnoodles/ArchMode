@@ -1376,20 +1376,19 @@ echo ""
 IFS=',' read -ra MODE_ARRAY <<< "$modes"
 for mode in "${MODE_ARRAY[@]}"; do
     mode=$(echo "$mode" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
-    case "$mode" in
-                GAMEMODE) enable_gamemode ;;
-        STREAMMODE) enable_streammode ;;
-        PRODUCTIVITY) enable_productivity ;;
-        POWERMODE) enable_powermode ;;
-        QUIETMODE) enable_quietmode ;;
-        DEVMODE) enable_devmode ;;
-        NIGHTMODE) enable_nightmode ;;
-        TRAVELMODE) enable_travelmode ;;
-        RENDERMODE) enable_rendermode ;;
-        ULTIMATE) enable_ultimatemode ;;
-        *)
-            echo -e "${RED}✗ Unknown mode: $mode${NC}"
-            return 1
-            ;;
-    esac
-}
+case "$mode" in
+    GAMEMODE) enable_gamemode ;;
+    STREAMMODE) enable_streammode ;;
+    PRODUCTIVITY) enable_productivity ;;
+    POWERMODE) enable_powermode ;;
+    QUIETMODE) enable_quietmode ;;
+    DEVMODE) enable_devmode ;;
+    NIGHTMODE) enable_nightmode ;;
+    TRAVELMODE) enable_travelmode ;;
+    RENDERMODE) enable_rendermode ;;
+    ULTIMATE) enable_ultimatemode ;;
+    *)
+        echo -e "${RED}✗ Unknown mode: $mode${NC}"
+        return 1
+        ;;
+esac
