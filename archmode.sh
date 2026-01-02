@@ -427,7 +427,7 @@ EOF
 list_hooks() {
     echo -e "${MAGENTA}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║           Available Hooks                                                     ║"
+    echo "║           Available Hooks              ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
@@ -490,7 +490,7 @@ dry_run_mode() {
 
     echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║        Dry Run - $mode"                                                     ║"
+    echo "║        Dry Run - $mode"                ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
@@ -553,7 +553,7 @@ dry_run_mode() {
 show_stats() {
     echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║        System Statistics                                                       ║"
+    echo "║        System Statistics               ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
 
@@ -1310,7 +1310,7 @@ enable_ultimatemode() {
 benchmark_performance() {
     echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║      Performance Benchmark                                          ║"
+    echo "║      Performance Benchmark             ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
@@ -1397,7 +1397,7 @@ echo -e "${GREEN}✓ Profile applied successfully${NC}"
 show_status() {
     echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║          ArchMode Status                                                    ║"
+    echo "║          ArchMode Status               ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
@@ -1420,7 +1420,7 @@ show_status() {
 list_modes() {
     echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║        Available Modes                                                       ║"
+    echo "║        Available Modes                 ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
@@ -1445,7 +1445,7 @@ list_modes() {
 list_profiles() {
     echo -e "${MAGENTA}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║       Available Profiles                                                       ║"
+    echo "║       Available Profiles               ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
@@ -1465,7 +1465,7 @@ list_profiles() {
 reset_all() {
     echo -e "${YELLOW}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║          Reset All Modes                                                      ║"
+    echo "║          Reset All Modes               ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
 
