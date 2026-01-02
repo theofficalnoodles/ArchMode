@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ArchMode - System Mode Manager for Arch Linux
-# Version: 0.8.0
+# Version: 0.9.0
 # Ultimate Performance Tool - Advanced system optimizations
 
 set -euo pipefail
@@ -24,7 +24,9 @@ STATE_FILE="$CONFIG_DIR/state.conf"
 MODES_FILE="$CONFIG_DIR/modes.conf"
 PROFILES_FILE="$CONFIG_DIR/profiles.conf"
 BACKUP_DIR="$CONFIG_DIR/backups"
-VERSION="0.8.0"
+PLUGINS_DIR="/usr/lib/archmode/plugins"
+HOOKS_DIR="/etc/archmode/hooks"
+VERSION="0.9.0"
 
 # Performance: Cache state in memory
 declare -A STATE_CACHE
@@ -40,6 +42,7 @@ SUDO_CHECKED=false
 
 # Create directories
 mkdir -p "$CONFIG_DIR" "$LOG_DIR" "$BACKUP_DIR"
+sudo mkdir -p "$PLUGINS_DIR" "$HOOKS_DIR" 2>/dev/null || true
 
 # Initialize state file
 [ ! -f "$STATE_FILE" ] && touch "$STATE_FILE"
@@ -73,6 +76,7 @@ WORKER:PRODUCTIVITY:Focused work environment
 TRAVELER:TRAVELMODE,QUIETMODE:Portable productivity
 CREATOR:RENDERMODE,DEVMODE:Content creation and rendering
 NIGHT_OWL:NIGHTMODE,QUIETMODE:Late night computing
+POWER_USER:ULTIMATE:Maximum performance for demanding tasks
 EOF
 fi
 
@@ -111,7 +115,7 @@ detect_system() {
     local cpu_count=$(nproc 2>/dev/null || echo "unknown")
     local total_mem=$(free -g 2>/dev/null | awk '/^Mem:/{print $2}' || echo "unknown")
     local gpu_vendor=$(lspci 2>/dev/null | grep -i 'vga\|3d' | head -n1 || echo "unknown")
-    
+
     {
         echo "CPU_CORES=$cpu_count"
         echo "TOTAL_RAM=${total_mem}G"
@@ -122,7 +126,7 @@ detect_system() {
             echo "IS_LAPTOP=false"
         fi
     } > "$CONFIG_DIR/system.info"
-    
+
     log "System detection completed"
 }
 
@@ -130,7 +134,7 @@ detect_system() {
 get_state() {
     local item=$1
     load_state_cache
-    
+
     if [[ -n "${STATE_CACHE[$item]:-}" ]]; then
         echo "${STATE_CACHE[$item]}"
     else
@@ -142,10 +146,10 @@ get_state() {
 set_state() {
     local item=$1
     local state=$2
-    
+
     load_state_cache
     STATE_CACHE["$item"]="$state"
-    
+
     # Update file efficiently
     if grep -q "^$item=" "$STATE_FILE" 2>/dev/null; then
         sed -i "s/^$item=.*/$item=$state/" "$STATE_FILE"
@@ -159,20 +163,20 @@ set_state() {
 batch_set_state() {
     local states=("$@")
     load_state_cache
-    
+
     for state_pair in "${states[@]}"; do
         local item="${state_pair%%=*}"
         local state="${state_pair#*=}"
         STATE_CACHE["$item"]="$state"
     done
-    
+
     # Write all at once
     {
         for key in "${!STATE_CACHE[@]}"; do
             echo "$key=${STATE_CACHE[$key]}"
         done
     } > "$STATE_FILE"
-    
+
     log "Batch state update: ${#states[@]} items"
 }
 
@@ -180,7 +184,7 @@ batch_set_state() {
 backup_config() {
     local timestamp=$(date '+%Y%m%d_%H%M%S')
     local backup_file="$BACKUP_DIR/backup_$timestamp.conf"
-    
+
     cp "$STATE_FILE" "$backup_file"
     echo -e "${GREEN}✓ Configuration backed up to: $backup_file${NC}"
     log "Backup created: $backup_file"
@@ -189,21 +193,22 @@ backup_config() {
 # Restore from backup
 restore_config() {
     local backups=($(ls -t "$BACKUP_DIR"/backup_*.conf 2>/dev/null))
-    
+
     if [ ${#backups[@]} -eq 0 ]; then
         echo -e "${RED}✗ No backups found${NC}"
         return 1
     fi
-    
+
     echo -e "${CYAN}Available backups:${NC}"
     for i in "${!backups[@]}"; do
         local date=$(basename "${backups[$i]}" | sed 's/backup_\(.*\).conf/\1/')
         echo -e "${BLUE}[$((i+1))]${NC} $date"
     done
-    
+
     read -p "Select backup to restore (1-${#backups[@]}): " choice
     if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#backups[@]}" ]; then
         cp "${backups[$((choice-1))]}" "$STATE_FILE"
+        STATE_CACHE_LOADED=false  # Invalidate cache
         echo -e "${GREEN}✓ Configuration restored${NC}"
         log "Restored from backup: ${backups[$((choice-1))]}"
     else
@@ -240,11 +245,11 @@ has_capability() {
 check_dependencies() {
     local missing=()
     load_system_capabilities
-    
+
     [ "${SYS_CAPABILITIES[dunst]}" = "false" ] && missing+=("dunst")
     [ "${SYS_CAPABILITIES[brightnessctl]}" = "false" ] && missing+=("brightnessctl")
     [ "${SYS_CAPABILITIES[cpupower]}" = "false" ] && missing+=("cpupower")
-    
+
     if [ ${#missing[@]} -gt 0 ]; then
         echo -e "${YELLOW}⚠ Optional dependencies missing:${NC}"
         printf '  - %s\n' "${missing[@]}"
@@ -253,14 +258,305 @@ check_dependencies() {
     fi
 }
 
+# ============================================
+# PLUGIN SYSTEM
+# ============================================
+
+# List available plugins
+plugin_list() {
+    echo -e "${MAGENTA}${BOLD}"
+    echo "╔════════════════════════════════════════╗"
+    echo "║        Available Plugins               ║"
+    echo "╚════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+
+    if [ ! -d "$PLUGINS_DIR" ]; then
+        echo -e "${YELLOW}No plugins directory found${NC}"
+        echo -e "${CYAN}Create plugins in: $PLUGINS_DIR${NC}"
+        return
+    fi
+
+    local found_plugins=false
+    for plugin in "$PLUGINS_DIR"/*.sh; do
+        if [ -f "$plugin" ]; then
+            found_plugins=true
+            local name=$(basename "$plugin" .sh)
+            local status="STOPPED"
+            if [ -f "/tmp/archmode_plugin_${name}.pid" ]; then
+                status="RUNNING"
+            fi
+            echo -e "${MAGENTA}➜${NC} ${BOLD}$name${NC} [$status]"
+
+            # Show description if available
+            local desc=$(grep -m1 "^# Description:" "$plugin" 2>/dev/null | cut -d: -f2- | xargs)
+            [ -n "$desc" ] && echo -e "  ${CYAN}$desc${NC}"
+        fi
+    done
+
+    if [ "$found_plugins" = false ]; then
+        echo -e "${YELLOW}No plugins found in $PLUGINS_DIR${NC}"
+    fi
+    echo ""
+}
+
+# Start a plugin
+plugin_start() {
+    local plugin_name=$1
+    local plugin_file="$PLUGINS_DIR/${plugin_name}.sh"
+
+    if [ ! -f "$plugin_file" ]; then
+        echo -e "${RED}✗ Plugin not found: $plugin_name${NC}"
+        return 1
+    fi
+
+    if [ -f "/tmp/archmode_plugin_${plugin_name}.pid" ]; then
+        echo -e "${YELLOW}⚠ Plugin already running${NC}"
+        return 0
+    fi
+
+    if [ ! -x "$plugin_file" ]; then
+        sudo chmod +x "$plugin_file" 2>/dev/null || chmod +x "$plugin_file" 2>/dev/null || true
+    fi
+
+    bash "$plugin_file" start 2>&1
+    echo $$ > "/tmp/archmode_plugin_${plugin_name}.pid"
+    echo -e "${GREEN}✓ Plugin started: $plugin_name${NC}"
+    log "Plugin started: $plugin_name"
+}
+
+# Stop a plugin
+plugin_stop() {
+    local plugin_name=$1
+    local plugin_file="$PLUGINS_DIR/${plugin_name}.sh"
+
+    if [ ! -f "$plugin_file" ]; then
+        echo -e "${RED}✗ Plugin not found: $plugin_name${NC}"
+        return 1
+    fi
+
+    bash "$plugin_file" stop 2>&1
+    rm -f "/tmp/archmode_plugin_${plugin_name}.pid"
+    echo -e "${GREEN}✓ Plugin stopped: $plugin_name${NC}"
+    log "Plugin stopped: $plugin_name"
+}
+
+# Get plugin status
+plugin_status() {
+    local plugin_name=$1
+    local plugin_file="$PLUGINS_DIR/${plugin_name}.sh"
+
+    if [ ! -f "$plugin_file" ]; then
+        echo -e "${RED}✗ Plugin not found: $plugin_name${NC}"
+        return 1
+    fi
+
+    bash "$plugin_file" status 2>&1
+}
+
+# ============================================
+# HOOKS SYSTEM
+# ============================================
+
+# Run hooks for a mode
+run_hooks() {
+    local mode=$1
+    local phase=$2  # start or stop
+    local hook_dir="$HOOKS_DIR/$mode/${phase}.d"
+
+    if [ ! -d "$hook_dir" ]; then
+        return 0
+    fi
+
+    log "Running $phase hooks for $mode"
+
+    for hook in "$hook_dir"/*; do
+        if [ -x "$hook" ]; then
+            log "Executing hook: $hook"
+            "$hook" 2>&1 | while IFS= read -r line; do
+                log "Hook output: $line"
+            done
+        fi
+    done
+}
+
+# Create example hook
+create_example_hooks() {
+    local mode=$1
+
+    if [ -z "$mode" ]; then
+        echo -e "${RED}✗ No mode specified${NC}"
+        return 1
+    fi
+
+    local start_dir="$HOOKS_DIR/$mode/start.d"
+    local stop_dir="$HOOKS_DIR/$mode/stop.d"
+
+    sudo mkdir -p "$start_dir" "$stop_dir" 2>/dev/null || mkdir -p "$start_dir" "$stop_dir" 2>/dev/null || true
+
+    # Create example start hook
+    local start_hook="$start_dir/10-example.sh"
+    if [ ! -f "$start_hook" ]; then
+        sudo tee "$start_hook" > /dev/null << 'EOF' || tee "$start_hook" > /dev/null << 'EOF'
+#!/bin/bash
+# Example start hook for mode
+echo "Mode starting..."
+# Add your custom commands here
+EOF
+        sudo chmod +x "$start_hook" 2>/dev/null || chmod +x "$start_hook" 2>/dev/null || true
+    fi
+
+    # Create example stop hook
+    local stop_hook="$stop_dir/10-example.sh"
+    if [ ! -f "$stop_hook" ]; then
+        sudo tee "$stop_hook" > /dev/null << 'EOF' || tee "$stop_hook" > /dev/null << 'EOF'
+#!/bin/bash
+# Example stop hook for mode
+echo "Mode stopping..."
+# Add your custom commands here
+EOF
+        sudo chmod +x "$stop_hook" 2>/dev/null || chmod +x "$stop_hook" 2>/dev/null || true
+    fi
+
+    echo -e "${GREEN}✓ Example hooks created for $mode${NC}"
+    echo -e "${CYAN}  Start hooks: $start_dir${NC}"
+    echo -e "${CYAN}  Stop hooks: $stop_dir${NC}"
+}
+
+# List hooks
+list_hooks() {
+    echo -e "${MAGENTA}${BOLD}"
+    echo "╔════════════════════════════════════════╗"
+    echo "║           Available Hooks                                                     ║"
+    echo "╚════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+
+    if [ ! -d "$HOOKS_DIR" ]; then
+        echo -e "${YELLOW}No hooks directory found${NC}"
+        echo -e "${CYAN}Create hooks in: $HOOKS_DIR/<MODE>/start.d/  or stop.d/${NC}"
+        return
+    fi
+
+    local found_hooks=false
+    for mode_dir in "$HOOKS_DIR"/*; do
+        if [ -d "$mode_dir" ]; then
+            local mode=$(basename "$mode_dir")
+            echo -e "${BOLD}$mode:${NC}"
+
+            # List start hooks
+            if [ -d "$mode_dir/start.d" ]; then
+                for hook in "$mode_dir/start.d"/*; do
+                    if [ -f "$hook" ]; then
+                        found_hooks=true
+                        local name=$(basename "$hook")
+                        local exec_status="[NOT EXECUTABLE]"
+                        [ -x "$hook" ] && exec_status="[EXECUTABLE]"
+                        echo -e "  ${GREEN}➜ start:${NC} $name $exec_status"
+                    fi
+                done
+            fi
+
+            # List stop hooks
+            if [ -d "$mode_dir/stop.d" ]; then
+                for hook in "$mode_dir/stop.d"/*; do
+                    if [ -f "$hook" ]; then
+                        found_hooks=true
+                        local name=$(basename "$hook")
+                        local exec_status="[NOT EXECUTABLE]"
+                        [ -x "$hook" ] && exec_status="[EXECUTABLE]"
+                        echo -e "  ${RED}➜ stop:${NC} $name $exec_status"
+                    fi
+                done
+            fi
+            echo ""
+        fi
+    done
+
+    if [ "$found_hooks" = false ]; then
+        echo -e "${YELLOW}No hooks found${NC}"
+    fi
+}
+
+# ============================================
+# DRY RUN MODE
+# ============================================
+
+DRY_RUN=false
+
+# Simulate mode changes
+dry_run_mode() {
+    local mode=$1
+
+    echo -e "${CYAN}${BOLD}"
+    echo "╔════════════════════════════════════════╗"
+    echo "║        Dry Run - $mode"                                                     ║"
+    echo "╚════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+    echo -e "${YELLOW}This is a simulation. No changes will be made.${NC}"
+    echo ""
+
+    case "$mode" in
+        GAMEMODE)
+            echo -e "${BOLD}Would apply:${NC}"
+            echo "  • Stop dunst service"
+            echo "  • Set CPU governor to 'performance'"
+            echo "  • Enable CPU boost"
+            echo "  • Optimize IRQ balancing"
+            echo "  • Set I/O scheduler to 'none'"
+            echo "  • Optimize memory for performance"
+            echo "  • Optimize network stack"
+            echo "  • Disable mouse acceleration"
+            echo "  • Prioritize game processes"
+            echo "  • Run start hooks from: $HOOKS_DIR/GAMEMODE/start.d/"
+            ;;
+        STREAMMODE)
+            echo -e "${BOLD}Would apply:${NC}"
+            echo "  • Stop dunst service"
+            echo "  • Set CPU governor to 'performance'"
+            echo "  • Enable CPU boost"
+            echo "  • Optimize network for streaming"
+            echo "  • Set I/O scheduler to 'bfq'"
+            echo "  • Prioritize OBS/FFmpeg processes"
+            echo "  • Run start hooks from: $HOOKS_DIR/STREAMMODE/start.d/"
+            ;;
+        ULTIMATE)
+            echo -e "${BOLD}Would apply:${NC}"
+            echo "  • ALL performance optimizations"
+            echo "  • Maximum CPU performance with boost"
+            echo "  • Lock CPU to max frequency"
+            echo "  • Ultimate I/O optimization"
+            echo "  • Ultimate memory optimization"
+            echo "  • Ultimate network optimization"
+            echo "  • Disable thermal throttling"
+            echo "  • Prioritize all user processes"
+            echo -e "${RED}  ⚠ Warning: System will run HOT!${NC}"
+            ;;
+        *)
+            echo -e "${YELLOW}Mode not found for dry run${NC}"
+            ;;
+    esac
+
+    echo ""
+    echo -e "${CYAN}Plugins that would be started:${NC}"
+    if [ -d "$PLUGINS_DIR" ]; then
+        for plugin in "$PLUGINS_DIR"/*.sh; do
+            [ -f "$plugin" ] && echo "  • $(basename "$plugin" .sh)"
+        done
+    else
+        echo "  (No plugins available)"
+    fi
+}
+
 # Monitor system resources (optimized)
 show_stats() {
     echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║        System Statistics               ║"
+    echo "║        System Statistics                                                       ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
-    
+
     # CPU Usage (optimized - use /proc/stat instead of top)
     local cpu_idle cpu_total
     read -r cpu_idle cpu_total < <(awk '/^cpu / {idle=$5+$6; total=idle+$2+$3+$4; print idle, total}' /proc/stat)
@@ -269,7 +565,7 @@ show_stats() {
     read -r cpu_idle2 cpu_total2 < <(awk '/^cpu / {idle=$5+$6; total=idle+$2+$3+$4; print idle, total}' /proc/stat)
     local cpu_usage=$(awk "BEGIN {printf \"%.1f\", (1-($cpu_idle2-$cpu_idle)/($cpu_total2-$cpu_total))*100}")
     echo -e "${BOLD}CPU Usage:${NC} ${cpu_usage}%"
-    
+
     # CPU Frequency (optimized)
     if has_capability "cpufreq" && [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq ]; then
         local freq=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq 2>/dev/null)
@@ -277,46 +573,58 @@ show_stats() {
             local freq_ghz=$(awk "BEGIN {printf \"%.2f\", $freq / 1000000}")
             echo -e "${BOLD}CPU Frequency:${NC} ${freq_ghz} GHz"
         fi
-        
+
         if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then
             local governor=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null)
             [ -n "$governor" ] && echo -e "${BOLD}CPU Governor:${NC} $governor"
         fi
     fi
-    
+
     # Memory (optimized - single read)
     local mem_info=$(awk '/^MemTotal:/{total=$2} /^MemAvailable:/{avail=$2} END {used=total-avail; printf "%.1fG / %.1fG (%.1f%%)", used/1024/1024, total/1024/1024, (used/total)*100}' /proc/meminfo 2>/dev/null)
     [ -n "$mem_info" ] && echo -e "${BOLD}Memory:${NC} $mem_info"
-    
+
     # Temperature (if available)
     if has_capability "sensors"; then
         local temp=$(sensors 2>/dev/null | grep -iE 'Package id 0|Tdie|Tctl' | awk '{print $2$3}' | head -n1 | sed 's/+//')
         [ -n "$temp" ] && echo -e "${BOLD}CPU Temp:${NC} $temp"
     fi
-    
+
     # Battery (if laptop)
     if has_capability "battery" && [ -f /sys/class/power_supply/BAT0/capacity ]; then
         local battery=$(cat /sys/class/power_supply/BAT0/capacity 2>/dev/null)
         local status=$(cat /sys/class/power_supply/BAT0/status 2>/dev/null)
         [ -n "$battery" ] && echo -e "${BOLD}Battery:${NC} ${battery}% ($status)"
     fi
-    
+
     # Disk usage (optimized)
     local disk_usage=$(df -h / 2>/dev/null | awk 'NR==2{printf "%s / %s (%s)", $3, $2, $5}')
     [ -n "$disk_usage" ] && echo -e "${BOLD}Disk Usage:${NC} $disk_usage"
-    
+
+    # Active plugins
+    echo ""
+    echo -e "${BOLD}Active Plugins:${NC}"
+    local active_found=false
+    for pidfile in /tmp/archmode_plugin_*.pid; do
+        if [ -f "$pidfile" ]; then
+            active_found=true
+            local plugin_name=$(basename "$pidfile" | sed 's/archmode_plugin_\(.*\).pid/\1/')
+            echo -e "  ${GREEN}✓${NC} $plugin_name"
+        fi
+    done
+    [ "$active_found" = false ] && echo -e "  ${YELLOW}(none)${NC}"
+
     echo ""
 }
 
 # ============================================
-# MODE IMPLEMENTATIONS
+# MODE IMPLEMENTATIONS (keeping your optimized versions)
 # ============================================
 
 # Helper: Apply CPU governor (optimized batch operation)
 apply_cpu_governor() {
     local governor=$1
     if has_capability "cpufreq" && check_sudo; then
-        # Batch operation - write to all CPUs at once
         for cpu_path in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
             [ -f "$cpu_path" ] && echo "$governor" | sudo tee "$cpu_path" >/dev/null 2>&1 || true
         done
@@ -337,12 +645,7 @@ apply_sysctl() {
 apply_io_scheduler() {
     local scheduler=$1
     if check_sudo; then
-        for blockdev in /sys/block/sd*/queue/scheduler; do
-            if [ -f "$blockdev" ]; then
-                echo "$scheduler" | sudo tee "$blockdev" >/dev/null 2>&1 || true
-            fi
-        done
-        for blockdev in /sys/block/nvme*/queue/scheduler; do
+        for blockdev in /sys/block/sd*/queue/scheduler /sys/block/nvme*/queue/scheduler; do
             if [ -f "$blockdev" ]; then
                 echo "$scheduler" | sudo tee "$blockdev" >/dev/null 2>&1 || true
             fi
@@ -355,7 +658,6 @@ optimize_irq_balancing() {
     if check_sudo && [ -f /proc/sys/kernel/sched_irqloadbalance ]; then
         sudo sysctl -w kernel.sched_irqloadbalance=1 >/dev/null 2>&1 || true
     fi
-    # Distribute IRQs across CPUs
     if [ -d /proc/irq ] && check_sudo; then
         local cpu_count=$(nproc)
         local cpu=0
@@ -373,16 +675,13 @@ set_process_priority() {
     local pid=$1
     local nice=$2
     local sched=${3:-SCHED_OTHER}
-    
+
     if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
         return 1
     fi
-    
+
     if check_sudo; then
-        # Set nice value
         sudo renice -n "$nice" -p "$pid" 2>/dev/null || true
-        
-        # Set real-time scheduling if requested
         if [ "$sched" = "SCHED_FIFO" ] || [ "$sched" = "SCHED_RR" ]; then
             local priority=50
             [ "$sched" = "SCHED_FIFO" ] && chrt -f -p "$priority" "$pid" 2>/dev/null || \
@@ -393,14 +692,13 @@ set_process_priority() {
 
 # Helper: Optimize memory settings (advanced)
 optimize_memory() {
-    local mode=$1  # performance or balanced
-    
+    local mode=$1
+
     if ! check_sudo; then
         return 1
     fi
-    
+
     if [ "$mode" = "performance" ]; then
-        # Performance: Disable THP, optimize for speed
         apply_sysctl \
             "vm.swappiness=1" \
             "vm.vfs_cache_pressure=50" \
@@ -408,8 +706,7 @@ optimize_memory() {
             "vm.dirty_background_ratio=5" \
             "vm.overcommit_memory=1" \
             "vm.zone_reclaim_mode=0"
-        
-        # Disable transparent huge pages for lower latency
+
         if [ -f /sys/kernel/mm/transparent_hugepage/enabled ]; then
             echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled >/dev/null 2>&1 || true
         fi
@@ -417,7 +714,6 @@ optimize_memory() {
             echo never | sudo tee /sys/kernel/mm/transparent_hugepage/defrag >/dev/null 2>&1 || true
         fi
     else
-        # Balanced: Restore defaults
         apply_sysctl \
             "vm.swappiness=60" \
             "vm.vfs_cache_pressure=100" \
@@ -425,7 +721,7 @@ optimize_memory() {
             "vm.dirty_background_ratio=10" \
             "vm.overcommit_memory=0" \
             "vm.zone_reclaim_mode=0"
-        
+
         if [ -f /sys/kernel/mm/transparent_hugepage/enabled ]; then
             echo madvise | sudo tee /sys/kernel/mm/transparent_hugepage/enabled >/dev/null 2>&1 || true
         fi
@@ -437,14 +733,13 @@ optimize_memory() {
 
 # Helper: Optimize network stack (advanced)
 optimize_network() {
-    local mode=$1  # performance or balanced
-    
+    local mode=$1
+
     if ! check_sudo; then
         return 1
     fi
-    
+
     if [ "$mode" = "performance" ]; then
-        # Advanced network optimizations
         apply_sysctl \
             "net.core.rmem_max=134217728" \
             "net.core.wmem_max=134217728" \
@@ -468,7 +763,6 @@ optimize_network() {
             "net.ipv4.tcp_max_tw_buckets=2000000" \
             "net.ipv4.tcp_fastopen=3"
     else
-        # Balanced: Restore defaults
         apply_sysctl \
             "net.core.rmem_max=212992" \
             "net.core.wmem_max=212992" \
@@ -481,12 +775,12 @@ optimize_network() {
 
 # Helper: Optimize CPU boost/turbo (advanced)
 optimize_cpu_boost() {
-    local enable=$1  # true or false
-    
+    local enable=$1
+
     if ! check_sudo || ! has_capability "cpufreq"; then
         return 1
     fi
-    
+
     for boost_file in /sys/devices/system/cpu/cpufreq/boost; do
         if [ -f "$boost_file" ]; then
             if [ "$enable" = "true" ]; then
@@ -496,8 +790,7 @@ optimize_cpu_boost() {
             fi
         fi
     done
-    
-    # Intel Turbo Boost
+
     for turbo_file in /sys/devices/system/cpu/intel_pstate/no_turbo; do
         if [ -f "$turbo_file" ]; then
             if [ "$enable" = "true" ]; then
@@ -511,11 +804,12 @@ optimize_cpu_boost() {
 
 enable_gamemode() {
     local current=$(get_state "GAMEMODE")
-    
+
     if [ "$current" = "true" ]; then
         echo -e "${YELLOW}➜ Disabling Gaming Mode...${NC}"
-        
-        # Restore normal settings (batch operations)
+
+        run_hooks "GAMEMODE" "stop"
+
         has_capability "dunst" && systemctl --user start dunst 2>/dev/null || true
         apply_cpu_governor "schedutil"
         optimize_cpu_boost "false"
@@ -526,30 +820,22 @@ enable_gamemode() {
             "kernel.sched_latency_ns=6000000" \
             "kernel.sched_min_granularity_ns=750000" \
             "vm.dirty_ratio=20"
-        
+
         set_state "GAMEMODE" "false"
         echo -e "${GREEN}✓ Gaming Mode disabled${NC}"
     else
         echo -e "${CYAN}➜ Enabling Gaming Mode...${NC}"
-        
-        # Disable notifications
+
+        run_hooks "GAMEMODE" "start"
+
         has_capability "dunst" && systemctl --user stop dunst 2>/dev/null || true
-        
-        # Advanced CPU optimizations
         apply_cpu_governor "performance"
         optimize_cpu_boost "true"
         optimize_irq_balancing
-        
-        # Advanced I/O optimizations (none scheduler for lowest latency)
         apply_io_scheduler "none"
-        
-        # Advanced memory optimizations
         optimize_memory "performance"
-        
-        # Advanced network optimizations
         optimize_network "performance"
-        
-        # Optimize scheduler for responsiveness (batch)
+
         apply_sysctl \
             "kernel.sched_latency_ns=4000000" \
             "kernel.sched_min_granularity_ns=500000" \
@@ -558,20 +844,18 @@ enable_gamemode() {
             "vm.swappiness=1" \
             "vm.dirty_ratio=15" \
             "vm.dirty_background_ratio=5"
-        
-        # Disable mouse acceleration (if X11) - optimized
+
         if has_capability "display" && has_capability "xinput"; then
             xinput list 2>/dev/null | grep -iE 'pointer|mouse' | grep -v 'XTEST' | \
             sed -n 's/.*id=\([0-9]*\).*/\1/p' | while read -r id; do
                 xinput set-prop "$id" "libinput Accel Speed" 0 2>/dev/null || true
             done
         fi
-        
-        # Optimize game processes (find and prioritize)
+
         for game_pid in $(pgrep -f -i "steam|lutris|wine|proton" 2>/dev/null | head -5); do
             set_process_priority "$game_pid" -15 "SCHED_OTHER" 2>/dev/null || true
         done
-        
+
         set_state "GAMEMODE" "true"
         echo -e "${GREEN}✓ Gaming Mode enabled${NC}"
         echo -e "${CYAN}  • Notifications disabled${NC}"
@@ -587,47 +871,40 @@ enable_gamemode() {
 
 enable_streammode() {
     local current=$(get_state "STREAMMODE")
-    
+
     if [ "$current" = "true" ]; then
         echo -e "${YELLOW}➜ Disabling Streaming Mode...${NC}"
-        
+
+        run_hooks "STREAMMODE" "stop"
+
         has_capability "dunst" && systemctl --user start dunst 2>/dev/null || true
         optimize_network "balanced"
         apply_io_scheduler "mq-deadline"
-        
+
         set_state "STREAMMODE" "false"
         echo -e "${GREEN}✓ Streaming Mode disabled${NC}"
     else
         echo -e "${CYAN}➜ Enabling Streaming Mode...${NC}"
-        
-        # Disable notifications
+
+        run_hooks "STREAMMODE" "start"
+
         has_capability "dunst" && systemctl --user stop dunst 2>/dev/null || true
-        
-        # Set CPU to performance with boost
         apply_cpu_governor "performance"
         optimize_cpu_boost "true"
-        
-        # Advanced network optimizations for streaming
         optimize_network "performance"
-        
-        # I/O scheduler for streaming (bfq for better fairness)
         apply_io_scheduler "bfq"
-        
-        # Memory optimizations
         optimize_memory "performance"
-        
-        # Increase process priority for common streaming apps (advanced)
+
         for app in obs ffmpeg gstreamer; do
             for pid in $(pgrep -x "$app" 2>/dev/null); do
                 set_process_priority "$pid" -15 "SCHED_OTHER" 2>/dev/null || true
             done
         done
-        
-        # Optimize encoding processes
+
         for pid in $(pgrep -f "x264|x265|nvenc|vaapi" 2>/dev/null); do
             set_process_priority "$pid" -10 "SCHED_OTHER" 2>/dev/null || true
         done
-        
+
         set_state "STREAMMODE" "true"
         echo -e "${GREEN}✓ Streaming Mode enabled${NC}"
         echo -e "${CYAN}  • Network stack fully optimized${NC}"
@@ -640,32 +917,31 @@ enable_streammode() {
 
 enable_productivity() {
     local current=$(get_state "PRODUCTIVITY")
-    
+
     if [ "$current" = "true" ]; then
         echo -e "${YELLOW}➜ Disabling Productivity Mode...${NC}"
-        
+
+        run_hooks "PRODUCTIVITY" "stop"
+
         if has_capability "display"; then
             command -v gsettings &>/dev/null && gsettings set org.gnome.desktop.session idle-delay 300 2>/dev/null || true
             has_capability "xrandr" && xset s on +dpms 2>/dev/null || true
         fi
-        
+
         set_state "PRODUCTIVITY" "false"
         echo -e "${GREEN}✓ Productivity Mode disabled${NC}"
     else
         echo -e "${CYAN}➜ Enabling Productivity Mode...${NC}"
-        
-        # Enable notifications
+
+        run_hooks "PRODUCTIVITY" "start"
+
         has_capability "dunst" && systemctl --user start dunst 2>/dev/null || true
-        
-        # Prevent screen sleep (optimized)
+
         if has_capability "display"; then
             command -v gsettings &>/dev/null && gsettings set org.gnome.desktop.session idle-delay 0 2>/dev/null || true
             has_capability "xrandr" && xset s off -dpms 2>/dev/null || true
         fi
-        
-        # Block distracting websites (optional)
-        command -v hostctl &>/dev/null && echo -e "${CYAN}  • To block distracting sites, edit /etc/hosts${NC}" || true
-        
+
         set_state "PRODUCTIVITY" "true"
         echo -e "${GREEN}✓ Productivity Mode enabled${NC}"
         echo -e "${CYAN}  • Screen sleep disabled${NC}"
@@ -675,45 +951,42 @@ enable_productivity() {
 
 enable_powermode() {
     local current=$(get_state "POWERMODE")
-    
+
     if [ "$current" = "true" ]; then
         echo -e "${YELLOW}➜ Disabling Power Save Mode...${NC}"
-        
+
+        run_hooks "POWERMODE" "stop"
+
         apply_cpu_governor "schedutil"
         if check_sudo && [ -f /sys/module/usbcore/parameters/autosuspend ]; then
             echo -1 | sudo tee /sys/module/usbcore/parameters/autosuspend >/dev/null 2>&1 || true
         fi
         has_capability "brightnessctl" && brightnessctl set 100% 2>/dev/null || true
         apply_sysctl "vm.laptop_mode=0"
-        
+
         set_state "POWERMODE" "false"
         echo -e "${GREEN}✓ Power Save Mode disabled${NC}"
     else
         echo -e "${CYAN}➜ Enabling Power Save Mode...${NC}"
-        
-        # Set CPU to powersave
+
+        run_hooks "POWERMODE" "start"
+
         apply_cpu_governor "powersave"
-        
-        # Enable aggressive USB suspend
+
         if check_sudo && [ -f /sys/module/usbcore/parameters/autosuspend ]; then
             echo 1 | sudo tee /sys/module/usbcore/parameters/autosuspend >/dev/null 2>&1 || true
         fi
-        
-        # Dim screen
+
         has_capability "brightnessctl" && brightnessctl set 50% 2>/dev/null || true
-        
-        # Enable laptop mode
         apply_sysctl "vm.laptop_mode=5"
-        
-        # Reduce screen refresh rate (if possible)
+
         if has_capability "display" && has_capability "xrandr"; then
             local output=$(xrandr 2>/dev/null | grep " connected" | cut -d" " -f1 | head -n1)
             [ -n "$output" ] && xrandr --output "$output" --rate 60 2>/dev/null || true
         fi
-        
-        # Stop unnecessary services
+
         systemctl --user stop tracker-miner-fs-3.service 2>/dev/null || true
-        
+
         set_state "POWERMODE" "true"
         echo -e "${GREEN}✓ Power Save Mode enabled${NC}"
         echo -e "${CYAN}  • CPU set to powersave${NC}"
@@ -724,10 +997,12 @@ enable_powermode() {
 
 enable_quietmode() {
     local current=$(get_state "QUIETMODE")
-    
+
     if [ "$current" = "true" ]; then
         echo -e "${YELLOW}➜ Disabling Quiet Mode...${NC}"
-        
+
+        run_hooks "QUIETMODE" "stop"
+
         apply_cpu_governor "schedutil"
         has_capability "pactl" && pactl set-sink-volume @DEFAULT_SINK@ 100% 2>/dev/null || true
         if check_sudo; then
@@ -735,25 +1010,23 @@ enable_quietmode() {
                 [ -f "$pwm" ] && echo 255 | sudo tee "$pwm" >/dev/null 2>&1 || true
             done
         fi
-        
+
         set_state "QUIETMODE" "false"
         echo -e "${GREEN}✓ Quiet Mode disabled${NC}"
     else
         echo -e "${CYAN}➜ Enabling Quiet Mode...${NC}"
-        
-        # Reduce CPU frequency
+
+        run_hooks "QUIETMODE" "start"
+
         apply_cpu_governor "powersave"
-        
-        # Reduce volume
         has_capability "pactl" && pactl set-sink-volume @DEFAULT_SINK@ 50% 2>/dev/null || true
-        
-        # Reduce fan speed (if controllable)
+
         if check_sudo; then
             for pwm in /sys/class/hwmon/hwmon*/pwm1; do
                 [ -f "$pwm" ] && echo 40 | sudo tee "$pwm" >/dev/null 2>&1 || true
             done
         fi
-        
+
         set_state "QUIETMODE" "true"
         echo -e "${GREEN}✓ Quiet Mode enabled${NC}"
         echo -e "${CYAN}  • CPU frequency reduced${NC}"
@@ -764,33 +1037,34 @@ enable_quietmode() {
 
 enable_devmode() {
     local current=$(get_state "DEVMODE")
-    
+
     if [ "$current" = "true" ]; then
         echo -e "${YELLOW}➜ Disabling Development Mode...${NC}"
-        
+
+        run_hooks "DEVMODE" "stop"
+
         if check_sudo; then
             systemctl is-active packagekit &>/dev/null || sudo systemctl start packagekit 2>/dev/null || true
             apply_sysctl "fs.inotify.max_user_watches=8192"
         fi
         ulimit -c 0 2>/dev/null || true
-        
+
         set_state "DEVMODE" "false"
         echo -e "${GREEN}✓ Development Mode disabled${NC}"
     else
         echo -e "${CYAN}➜ Enabling Development Mode...${NC}"
-        
-        # Disable package manager
+
+        run_hooks "DEVMODE" "start"
+
         if check_sudo; then
             systemctl is-active packagekit &>/dev/null && sudo systemctl stop packagekit 2>/dev/null || true
-            # Increase file watchers for IDEs and shared memory (batch)
             apply_sysctl \
                 "fs.inotify.max_user_watches=524288" \
                 "kernel.shmmax=68719476736"
         fi
-        
-        # Unlimited core dumps
+
         ulimit -c unlimited 2>/dev/null || true
-        
+
         set_state "DEVMODE" "true"
         echo -e "${GREEN}✓ Development Mode enabled${NC}"
         echo -e "${CYAN}  • File watchers increased (IDEs)${NC}"
@@ -801,37 +1075,33 @@ enable_devmode() {
 
 enable_nightmode() {
     local current=$(get_state "NIGHTMODE")
-    
+
     if [ "$current" = "true" ]; then
         echo -e "${YELLOW}➜ Disabling Night Mode...${NC}"
-        
-        # Restore color temperature
+
+        run_hooks "NIGHTMODE" "stop"
+
         has_capability "redshift" && redshift -x 2>/dev/null || true
         has_capability "brightnessctl" && brightnessctl set 100% 2>/dev/null || true
         has_capability "pactl" && pactl set-sink-volume @DEFAULT_SINK@ 100% 2>/dev/null || true
-        
+
         set_state "NIGHTMODE" "false"
         echo -e "${GREEN}✓ Night Mode disabled${NC}"
     else
         echo -e "${CYAN}➜ Enabling Night Mode...${NC}"
-        
-        # Reduce blue light
+
+        run_hooks "NIGHTMODE" "start"
+
         if has_capability "redshift"; then
             redshift -O 3400 2>/dev/null || true
             echo -e "${CYAN}  • Blue light reduced (3400K)${NC}"
         else
             echo -e "${YELLOW}  ⚠ Install redshift for blue light reduction${NC}"
         fi
-        
-        # Dim screen
+
         has_capability "brightnessctl" && brightnessctl set 30% 2>/dev/null || true
-        
-        # Lower volume
         has_capability "pactl" && pactl set-sink-volume @DEFAULT_SINK@ 40% 2>/dev/null || true
-        
-        # Enable quiet mode too
-        enable_quietmode
-        
+
         set_state "NIGHTMODE" "true"
         echo -e "${GREEN}✓ Night Mode enabled${NC}"
         echo -e "${CYAN}  • Screen dimmed to 30%${NC}"
@@ -841,32 +1111,32 @@ enable_nightmode() {
 
 enable_travelmode() {
     local current=$(get_state "TRAVELMODE")
-    
+
     if [ "$current" = "true" ]; then
         echo -e "${YELLOW}➜ Disabling Travel Mode...${NC}"
-        
-        # Restore normal settings
+
+        run_hooks "TRAVELMODE" "stop"
+
         apply_cpu_governor "schedutil"
         if check_sudo; then
             systemctl is-enabled bluetooth &>/dev/null && sudo systemctl start bluetooth 2>/dev/null || true
             sudo rfkill unblock wifi 2>/dev/null || true
         fi
         has_capability "brightnessctl" && brightnessctl set 100% 2>/dev/null || true
-        
+
         set_state "TRAVELMODE" "false"
         echo -e "${GREEN}✓ Travel Mode disabled${NC}"
     else
         echo -e "${CYAN}➜ Enabling Travel Mode...${NC}"
-        
-        # Maximum power saving
+
+        run_hooks "TRAVELMODE" "start"
+
         enable_powermode
-        
-        # Disable Bluetooth
+
         if check_sudo; then
             systemctl is-active bluetooth &>/dev/null && sudo systemctl stop bluetooth 2>/dev/null || true
         fi
-        
-        # Reduce WiFi power (optimized)
+
         if command -v iw &>/dev/null && check_sudo; then
             for dev in /sys/class/net/wl*/device; do
                 if [ -e "$dev" ]; then
@@ -875,10 +1145,9 @@ enable_travelmode() {
                 fi
             done
         fi
-        
-        # Extremely dim screen
+
         has_capability "brightnessctl" && brightnessctl set 20% 2>/dev/null || true
-        
+
         set_state "TRAVELMODE" "true"
         echo -e "${GREEN}✓ Travel Mode enabled${NC}"
         echo -e "${CYAN}  • Maximum battery optimization${NC}"
@@ -889,10 +1158,12 @@ enable_travelmode() {
 
 enable_rendermode() {
     local current=$(get_state "RENDERMODE")
-    
+
     if [ "$current" = "true" ]; then
         echo -e "${YELLOW}➜ Disabling Render Mode...${NC}"
-        
+
+        run_hooks "RENDERMODE" "stop"
+
         apply_cpu_governor "schedutil"
         optimize_cpu_boost "false"
         apply_io_scheduler "mq-deadline"
@@ -900,17 +1171,17 @@ enable_rendermode() {
         if check_sudo; then
             systemctl is-enabled thermald &>/dev/null && sudo systemctl start thermald 2>/dev/null || true
         fi
-        
+
         set_state "RENDERMODE" "false"
         echo -e "${GREEN}✓ Render Mode disabled${NC}"
     else
         echo -e "${CYAN}➜ Enabling Render Mode...${NC}"
-        
-        # Maximum CPU performance with boost
+
+        run_hooks "RENDERMODE" "start"
+
         apply_cpu_governor "performance"
         optimize_cpu_boost "true"
-        
-        # Disable CPU frequency scaling for consistency (optimized)
+
         if has_capability "cpufreq" && check_sudo; then
             for cpu_max in /sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq; do
                 if [ -f "$cpu_max" ]; then
@@ -920,30 +1191,24 @@ enable_rendermode() {
                 fi
             done
         fi
-        
-        # Advanced I/O optimization for rendering (bfq for better throughput)
+
         apply_io_scheduler "bfq"
-        
-        # Advanced memory optimization
         optimize_memory "performance"
-        
-        # Disable thermal throttling temporarily (use with caution!)
+
         if check_sudo; then
             systemctl is-active thermald &>/dev/null && sudo systemctl stop thermald 2>/dev/null || true
         fi
-        
-        # Increase priority for rendering processes (advanced)
+
         for render_app in blender maya houdini cinema4d; do
             for pid in $(pgrep -x "$render_app" 2>/dev/null); do
                 set_process_priority "$pid" -20 "SCHED_OTHER" 2>/dev/null || true
             done
         done
-        
-        # Optimize video encoding processes
+
         for pid in $(pgrep -f "ffmpeg|handbrake|makemkv" 2>/dev/null); do
             set_process_priority "$pid" -15 "SCHED_OTHER" 2>/dev/null || true
         done
-        
+
         set_state "RENDERMODE" "true"
         echo -e "${GREEN}✓ Render Mode enabled${NC}"
         echo -e "${CYAN}  • CPU locked to maximum frequency with boost${NC}"
@@ -957,11 +1222,12 @@ enable_rendermode() {
 
 enable_ultimatemode() {
     local current=$(get_state "ULTIMATE")
-    
+
     if [ "$current" = "true" ]; then
         echo -e "${YELLOW}➜ Disabling Ultimate Performance Mode...${NC}"
-        
-        # Restore all settings
+
+        run_hooks "ULTIMATE" "stop"
+
         has_capability "dunst" && systemctl --user start dunst 2>/dev/null || true
         apply_cpu_governor "schedutil"
         optimize_cpu_boost "false"
@@ -971,22 +1237,20 @@ enable_ultimatemode() {
         if check_sudo; then
             systemctl is-enabled thermald &>/dev/null && sudo systemctl start thermald 2>/dev/null || true
         fi
-        
+
         set_state "ULTIMATE" "false"
         echo -e "${GREEN}✓ Ultimate Performance Mode disabled${NC}"
     else
         echo -e "${CYAN}${BOLD}➜ Enabling ULTIMATE Performance Mode...${NC}"
         echo -e "${YELLOW}  This enables ALL performance optimizations!${NC}"
         echo ""
-        
-        # Disable notifications
+
+        run_hooks "ULTIMATE" "start"
+
         has_capability "dunst" && systemctl --user stop dunst 2>/dev/null || true
-        
-        # Maximum CPU performance
         apply_cpu_governor "performance"
         optimize_cpu_boost "true"
-        
-        # Lock CPU to max frequency
+
         if has_capability "cpufreq" && check_sudo; then
             for cpu_max in /sys/devices/system/cpu/cpu*/cpufreq/scaling_max_freq; do
                 if [ -f "$cpu_max" ]; then
@@ -996,20 +1260,12 @@ enable_ultimatemode() {
                 fi
             done
         fi
-        
-        # Advanced IRQ balancing
+
         optimize_irq_balancing
-        
-        # Ultimate I/O optimization (none for absolute lowest latency)
         apply_io_scheduler "none"
-        
-        # Ultimate memory optimization
         optimize_memory "performance"
-        
-        # Ultimate network optimization
         optimize_network "performance"
-        
-        # Ultimate scheduler tuning
+
         apply_sysctl \
             "kernel.sched_latency_ns=3000000" \
             "kernel.sched_min_granularity_ns=400000" \
@@ -1023,19 +1279,17 @@ enable_ultimatemode() {
             "vm.overcommit_memory=1" \
             "vm.zone_reclaim_mode=0" \
             "vm.min_free_kbytes=65536"
-        
-        # Disable thermal throttling (EXTREME - monitor temps!)
+
         if check_sudo; then
             systemctl is-active thermald &>/dev/null && sudo systemctl stop thermald 2>/dev/null || true
         fi
-        
-        # Prioritize ALL user processes
+
         if check_sudo; then
             for pid in $(pgrep -u "$USER" 2>/dev/null | head -20); do
                 set_process_priority "$pid" -10 "SCHED_OTHER" 2>/dev/null || true
             done
         fi
-        
+
         set_state "ULTIMATE" "true"
         echo -e "${GREEN}✓${NC} ${BOLD}ULTIMATE Performance Mode enabled!${NC}"
         echo -e "${CYAN}  • CPU: Maximum performance with boost enabled${NC}"
@@ -1056,17 +1310,16 @@ enable_ultimatemode() {
 benchmark_performance() {
     echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║      Performance Benchmark             ║"
+    echo "║      Performance Benchmark                                          ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
-    
+
     local results_file="$LOG_DIR/benchmark_$(date +%Y%m%d_%H%M%S).txt"
-    
+
     echo -e "${CYAN}Running benchmarks...${NC}"
     echo ""
-    
-    # CPU benchmark (simple calculation)
+
     echo -e "${BOLD}1. CPU Performance Test${NC}"
     local cpu_start=$(date +%s%N)
     local sum=0
@@ -1077,18 +1330,16 @@ benchmark_performance() {
     local cpu_time=$(awk "BEGIN {printf \"%.3f\", ($cpu_end - $cpu_start) / 1000000000}")
     echo -e "   CPU Test: ${GREEN}${cpu_time}s${NC}"
     echo "CPU: ${cpu_time}s" >> "$results_file"
-    
-    # Memory benchmark
+
     echo -e "${BOLD}2. Memory Performance Test${NC}"
     local mem_start=$(date +%s%N)
-    local test_data=$(dd if=/dev/zero of=/tmp/archmode_benchmark bs=1M count=100 2>/dev/null)
+    dd if=/dev/zero of=/tmp/archmode_benchmark bs=1M count=100 2>/dev/null >/dev/null
     rm -f /tmp/archmode_benchmark 2>/dev/null
     local mem_end=$(date +%s%N)
     local mem_time=$(awk "BEGIN {printf \"%.3f\", ($mem_end - $mem_start) / 1000000000}")
     echo -e "   Memory Test: ${GREEN}${mem_time}s${NC}"
     echo "Memory: ${mem_time}s" >> "$results_file"
-    
-    # I/O benchmark
+
     echo -e "${BOLD}3. I/O Performance Test${NC}"
     local io_start=$(date +%s%N)
     local io_result=$(dd if=/dev/zero of=/tmp/archmode_io_test bs=1M count=50 oflag=direct 2>&1 | grep -o '[0-9.]* MB/s' | head -1)
@@ -1097,78 +1348,64 @@ benchmark_performance() {
     local io_time=$(awk "BEGIN {printf \"%.3f\", ($io_end - $io_start) / 1000000000}")
     echo -e "   I/O Test: ${GREEN}${io_time}s${NC} ${io_result:+($io_result)}"
     echo "I/O: ${io_time}s" >> "$results_file"
-    
-    # System info
+
     echo "" >> "$results_file"
     echo "System Info:" >> "$results_file"
     echo "CPU Governor: $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo 'N/A')" >> "$results_file"
     echo "CPU Frequency: $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq 2>/dev/null | awk '{printf "%.2f GHz", $1/1000000}' || echo 'N/A')" >> "$results_file"
-    echo "I/O Scheduler: $(cat /sys/block/$(lsblk -ndo NAME | head -1)/queue/scheduler 2>/dev/null | grep -o '\[.*\]' || echo 'N/A')" >> "$results_file"
-    
+    echo "I/O Scheduler: $(cat /sys/block/$(lsblk -ndo NAME | head -1)/queue/scheduler 2>/dev/null | grep -o '\[.*\]' || echo 'N/A')" >> "$results_
     echo ""
     echo -e "${GREEN}✓ Benchmark complete!${NC}"
     echo -e "${CYAN}Results saved to: $results_file${NC}"
     log "Performance benchmark completed: $results_file"
-}
+local profile_line=$(grep -i "^$profile:" "$PROFILES_FILE" 2>/dev/null | head -1)
 
-# Profile management
-apply_profile() {
-    local profile=$1
-    # Convert to uppercase for case-insensitive matching
-    profile=$(echo "$profile" | tr '[:lower:]' '[:upper:]')
-    
-    # Find profile in config (case-insensitive)
-    local profile_line=$(grep -i "^$profile:" "$PROFILES_FILE" 2>/dev/null | head -1)
-    
-    if [ -z "$profile_line" ]; then
-        echo -e "${RED}✗ Profile '$profile' not found${NC}"
-        return 1
-    fi
-    
-    # Extract actual profile name from line (first field)
-    local actual_profile=$(echo "$profile_line" | cut -d: -f1)
-    local modes=$(echo "$profile_line" | cut -d: -f2)
-    local description=$(echo "$profile_line" | cut -d: -f3)
-    
-    echo -e "${CYAN}➜ Applying profile: ${BOLD}$actual_profile${NC}"
-    echo -e "${CYAN}  $description${NC}"
-    echo ""
-    
-    # Split modes and enable each (already uppercase in config)
-    IFS=',' read -ra MODE_ARRAY <<< "$modes"
-    for mode in "${MODE_ARRAY[@]}"; do
-        # Trim whitespace and ensure uppercase
-        mode=$(echo "$mode" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
-        case "$mode" in
-            GAMEMODE) enable_gamemode ;;
-            STREAMMODE) enable_streammode ;;
-            PRODUCTIVITY) enable_productivity ;;
-            POWERMODE) enable_powermode ;;
-            QUIETMODE) enable_quietmode ;;
-            DEVMODE) enable_devmode ;;
-            NIGHTMODE) enable_nightmode ;;
-            TRAVELMODE) enable_travelmode ;;
-            RENDERMODE) enable_rendermode ;;
-            ULTIMATE) enable_ultimatemode ;;
-        esac
-    done
-    
-    echo -e "${GREEN}✓ Profile applied successfully${NC}"
+if [ -z "$profile_line" ]; then
+    echo -e "${RED}✗ Profile '$profile' not found${NC}"
+    return 1
+fi
+
+local actual_profile=$(echo "$profile_line" | cut -d: -f1)
+local modes=$(echo "$profile_line" | cut -d: -f2)
+local description=$(echo "$profile_line" | cut -d: -f3)
+
+echo -e "${CYAN}➜ Applying profile: ${BOLD}$actual_profile${NC}"
+echo -e "${CYAN}  $description${NC}"
+echo ""
+
+IFS=',' read -ra MODE_ARRAY <<< "$modes"
+for mode in "${MODE_ARRAY[@]}"; do
+    mode=$(echo "$mode" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
+    case "$mode" in
+GAMEMODE) enable_gamemode ;;
+        STREAMMODE) enable_streammode ;;
+        PRODUCTIVITY) enable_productivity ;;
+        POWERMODE) enable_powermode ;;
+        QUIETMODE) enable_quietmode ;;
+        DEVMODE) enable_devmode ;;
+        NIGHTMODE) enable_nightmode ;;
+        TRAVELMODE) enable_travelmode ;;
+        RENDERMODE) enable_rendermode ;;
+        ULTIMATE) enable_ultimatemode ;;
+    esac
+done
+
+echo -e "${GREEN}✓ Profile applied successfully${NC}"
 }
 
 # Show status
 show_status() {
     echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║          ArchMode Status               ║"
+    echo "║          ArchMode Status                                                    ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
-    
+
     while IFS=: read -r mode_name display_name category description; do
         [[ "$mode_name" =~ ^#.*$ ]] && continue
         [[ -z "$mode_name" ]] && continue
-        
+
         local state=$(get_state "$mode_name")
         if [ "$state" = "true" ]; then
             echo -e "${GREEN}✓${NC} ${BOLD}$display_name${NC} ${GREEN}[ENABLED]${NC}"
@@ -1183,21 +1420,21 @@ show_status() {
 list_modes() {
     echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║        Available Modes                 ║"
+    echo "║        Available Modes                                                       ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
-    
+
     local current_category=""
     while IFS=: read -r mode_name display_name category description; do
         [[ "$mode_name" =~ ^#.*$ ]] && continue
         [[ -z "$mode_name" ]] && continue
-        
+
         if [ "$category" != "$current_category" ]; then
             echo -e "${MAGENTA}${BOLD}$category:${NC}"
             current_category="$category"
         fi
-        
+
         echo -e "  ${CYAN}➜${NC} ${BOLD}$mode_name${NC} - $display_name"
         echo -e "    ${description}"
     done < "$MODES_FILE"
@@ -1208,15 +1445,15 @@ list_modes() {
 list_profiles() {
     echo -e "${MAGENTA}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║       Available Profiles               ║"
+    echo "║       Available Profiles                                                       ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
-    
+
     while IFS=: read -r profile_name modes description; do
         [[ "$profile_name" =~ ^#.*$ ]] && continue
         [[ -z "$profile_name" ]] && continue
-        
+
         echo -e "${MAGENTA}➜${NC} ${BOLD}$profile_name${NC}"
         echo -e "  ${description}"
         echo -e "  ${CYAN}Modes: $modes${NC}"
@@ -1228,7 +1465,7 @@ list_profiles() {
 reset_all() {
     echo -e "${YELLOW}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║          Reset All Modes               ║"
+    echo "║          Reset All Modes                                                      ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
 
@@ -1247,7 +1484,7 @@ reset_all() {
         [[ -z "$mode_name" ]] && continue
         states_to_reset+=("$mode_name=false")
     done < "$MODES_FILE"
-    
+
     if [ ${#states_to_reset[@]} -gt 0 ]; then
         batch_set_state "${states_to_reset[@]}"
     fi
@@ -1257,7 +1494,7 @@ reset_all() {
     has_capability "dunst" && systemctl --user start dunst 2>/dev/null || true
     has_capability "brightnessctl" && brightnessctl set 100% 2>/dev/null || true
     has_capability "pactl" && pactl set-sink-volume @DEFAULT_SINK@ 100% 2>/dev/null || true
-    
+
     if check_sudo; then
         systemctl is-enabled thermald &>/dev/null && sudo systemctl start thermald 2>/dev/null || true
         systemctl is-enabled bluetooth &>/dev/null && sudo systemctl start bluetooth 2>/dev/null || true
@@ -1273,26 +1510,23 @@ update_archmode() {
     local INSTALLED_SCRIPT="/usr/local/bin/archmode"
     local TEMP_DIR=$(mktemp -d)
     local BACKUP_SCRIPT="$INSTALLED_SCRIPT.backup.$(date +%Y%m%d_%H%M%S)"
-    
+
     echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║         Updating ArchMode              ║"
+    echo "║         Updating ArchMode                                               ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
-    
-    # Check if script is installed
+
     if [ ! -f "$INSTALLED_SCRIPT" ]; then
         echo -e "${RED}✗ ArchMode not found at $INSTALLED_SCRIPT${NC}"
         echo -e "${YELLOW}  Please install ArchMode first${NC}"
         return 1
     fi
-    
-    # Check for git or curl/wget
+
     if command -v git &>/dev/null; then
         echo -e "${CYAN}➜ Using git to download latest version...${NC}"
-        
-        # Clone the repository
+
         if git clone "$GITHUB_REPO.git" "$TEMP_DIR/ArchMode" 2>/dev/null; then
             if [ -f "$TEMP_DIR/ArchMode/archmode.sh" ]; then
                 local NEW_SCRIPT="$TEMP_DIR/ArchMode/archmode.sh"
@@ -1308,8 +1542,7 @@ update_archmode() {
         fi
     elif command -v curl &>/dev/null; then
         echo -e "${CYAN}➜ Using curl to download latest version...${NC}"
-        
-        # Download the script directly
+
         local NEW_SCRIPT="$TEMP_DIR/archmode.sh"
         if curl -sL "$GITHUB_REPO/raw/main/archmode.sh" -o "$NEW_SCRIPT"; then
             if [ ! -f "$NEW_SCRIPT" ] || [ ! -s "$NEW_SCRIPT" ]; then
@@ -1324,8 +1557,7 @@ update_archmode() {
         fi
     elif command -v wget &>/dev/null; then
         echo -e "${CYAN}➜ Using wget to download latest version...${NC}"
-        
-        # Download the script directly
+
         local NEW_SCRIPT="$TEMP_DIR/archmode.sh"
         if wget -q "$GITHUB_REPO/raw/main/archmode.sh" -O "$NEW_SCRIPT"; then
             if [ ! -f "$NEW_SCRIPT" ] || [ ! -s "$NEW_SCRIPT" ]; then
@@ -1343,21 +1575,18 @@ update_archmode() {
         echo -e "${YELLOW}  Install one with: sudo pacman -S git${NC}"
         return 1
     fi
-    
-    # Check if new version is different
+
     if cmp -s "$INSTALLED_SCRIPT" "$NEW_SCRIPT" 2>/dev/null; then
         echo -e "${GREEN}✓ Already running the latest version${NC}"
         rm -rf "$TEMP_DIR"
         return 0
     fi
-    
-    # Get new version number
+
     local NEW_VERSION=$(grep -m1 "^VERSION=" "$NEW_SCRIPT" 2>/dev/null | cut -d'"' -f2 || echo "unknown")
     echo -e "${CYAN}➜ New version found: ${BOLD}$NEW_VERSION${NC}"
     echo -e "${CYAN}  Current version: ${BOLD}$VERSION${NC}"
     echo ""
-    
-    # Backup current script
+
     echo -e "${CYAN}➜ Backing up current version...${NC}"
     if sudo cp "$INSTALLED_SCRIPT" "$BACKUP_SCRIPT"; then
         echo -e "${GREEN}✓ Backup created: $BACKUP_SCRIPT${NC}"
@@ -1365,8 +1594,7 @@ update_archmode() {
     else
         echo -e "${YELLOW}⚠ Failed to create backup (continuing anyway)${NC}"
     fi
-    
-    # Install new version
+
     echo -e "${CYAN}➜ Installing new version...${NC}"
     if sudo cp "$NEW_SCRIPT" "$INSTALLED_SCRIPT" && sudo chmod +x "$INSTALLED_SCRIPT"; then
         echo -e "${GREEN}✓ New version installed successfully${NC}"
@@ -1378,11 +1606,9 @@ update_archmode() {
         rm -rf "$TEMP_DIR"
         return 1
     fi
-    
-    # Clean up temporary files
+
     rm -rf "$TEMP_DIR"
-    
-    # Optionally remove old backups (keep last 3)
+
     local backups=($(ls -t "$INSTALLED_SCRIPT".backup.* 2>/dev/null))
     if [ ${#backups[@]} -gt 3 ]; then
         echo -e "${CYAN}➜ Cleaning up old backups...${NC}"
@@ -1390,29 +1616,26 @@ update_archmode() {
             sudo rm -f "${backups[$i]}"
         done
     fi
-    
+
     echo ""
     echo -e "${GREEN}✓${NC} ${BOLD}Update complete!${NC}"
     echo -e "${CYAN}  ArchMode has been updated to version $NEW_VERSION${NC}"
     echo -e "${CYAN}  Your configuration and logs have been preserved${NC}"
     echo ""
-    echo -e "${YELLOW}Note:${NC} If you're running this update command, you may need to"
-    echo -e "      restart your terminal or run: ${BOLD}hash -r${NC}"
 }
 
 # Uninstall ArchMode
 uninstall_archmode() {
     local INSTALLED_SCRIPT="/usr/local/bin/archmode"
     local SYSTEMD_SERVICE="/etc/systemd/system/archmode.service"
-    
+
     echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║        Uninstalling ArchMode           ║"
+    echo "║        Uninstalling ArchMode                                           ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
-    
-    # Check if script is installed
+
     if [ ! -f "$INSTALLED_SCRIPT" ]; then
         echo -e "${YELLOW}⚠ ArchMode not found at $INSTALLED_SCRIPT${NC}"
         echo -e "${CYAN}  It may already be uninstalled${NC}"
@@ -1426,8 +1649,7 @@ uninstall_archmode() {
             return 1
         fi
     fi
-    
-    # Remove systemd service if it exists
+
     if [ -f "$SYSTEMD_SERVICE" ]; then
         echo -e "${CYAN}➜ Removing systemd service...${NC}"
         sudo systemctl disable archmode 2>/dev/null || true
@@ -1438,34 +1660,24 @@ uninstall_archmode() {
             echo -e "${YELLOW}⚠ Failed to remove systemd service${NC}"
         fi
     fi
-    
-    # Ask about config and data
+
     echo ""
     echo -e "${YELLOW}Configuration and data files:${NC}"
     echo -e "  ${CYAN}~/.config/archmode${NC}"
     echo -e "  ${CYAN}~/.local/share/archmode${NC}"
     echo ""
     read -p "Do you want to remove configuration and data files? (y/N): " remove_config
-    
+
     if [[ "$remove_config" == "y" || "$remove_config" == "Y" ]]; then
         echo -e "${CYAN}➜ Removing configuration files...${NC}"
-        if rm -rf "$CONFIG_DIR"; then
-            echo -e "${GREEN}✓ Configuration removed${NC}"
-        else
-            echo -e "${YELLOW}⚠ Failed to remove configuration${NC}"
-        fi
-        
+        rm -rf "$CONFIG_DIR" && echo -e "${GREEN}✓ Configuration removed${NC}" || echo -e "${YELLOW}⚠ Failed to remove configuration${NC}"
+
         echo -e "${CYAN}➜ Removing data files...${NC}"
-        if rm -rf "$LOG_DIR"; then
-            echo -e "${GREEN}✓ Data files removed${NC}"
-        else
-            echo -e "${YELLOW}⚠ Failed to remove data files${NC}"
-        fi
+        rm -rf "$LOG_DIR" && echo -e "${GREEN}✓ Data files removed${NC}" || echo -e "${YELLOW}⚠ Failed to remove data files${NC}"
     else
         echo -e "${CYAN}➜ Configuration and data files preserved${NC}"
     fi
-    
-    # Remove backups
+
     local backups=($(ls -t "$INSTALLED_SCRIPT".backup.* 2>/dev/null))
     if [ ${#backups[@]} -gt 0 ]; then
         echo -e "${CYAN}➜ Removing backup files...${NC}"
@@ -1474,7 +1686,7 @@ uninstall_archmode() {
         done
         echo -e "${GREEN}✓ Backups removed${NC}"
     fi
-    
+
     echo ""
     echo -e "${GREEN}✓${NC} ${BOLD}Uninstallation complete!${NC}"
     echo -e "${CYAN}  ArchMode has been removed from your system${NC}"
@@ -1493,8 +1705,8 @@ show_help() {
     echo "  stats                  Show live system statistics"
     echo "  modes                  List available modes"
     echo "  profiles               List available profiles"
-    echo "  enable <MODE>           Toggle a specific mode"
-    echo "  profile <PROFILE>       Apply a profile"
+    echo "  enable <MODE>          Toggle a specific mode"
+    echo "  profile <PROFILE>      Apply a profile"
     echo "  reset                  Disable all modes"
     echo "  backup                 Backup current state"
     echo "  restore                Restore a backup"
@@ -1502,13 +1714,29 @@ show_help() {
     echo "  benchmark              Run performance benchmark"
     echo "  update                 Update ArchMode to latest version"
     echo "  uninstall              Uninstall ArchMode from system"
-    echo "  help                   Show this help message"
+    echo "  check                  Check dependencies"
+    echo ""
+    echo -e "${BOLD}Plugin Commands:${NC}"
+    echo "  plugins list           List all plugins"
+    echo "  plugins start <NAME>   Start a plugin"
+    echo "  plugins stop <NAME>    Stop a plugin"
+    echo "  plugins status <NAME>  Check plugin status"
+    echo ""
+    echo -e "${BOLD}Hook Commands:${NC}"
+    echo "  hooks list             List all hooks"
+    echo "  hooks create <MODE>    Create example hooks for mode"
+    echo ""
+    echo -e "${BOLD}Advanced Commands:${NC}"
+    echo "  dry-run <MODE>         Simulate mode changes"
     echo ""
     echo -e "${BOLD}Examples:${NC}"
     echo "  archmode enable GAMEMODE"
-    echo "  archmode enable gamemode    # Case-insensitive"
+    echo "  archmode enable gamemode      # Case-insensitive"
     echo "  archmode profile GAMER"
-    echo "  archmode profile gamer     # Case-insensitive"
+    echo "  archmode profile gamer        # Case-insensitive"
+    echo "  archmode plugins start fan"
+    echo "  archmode hooks create GAMEMODE"
+    echo "  archmode dry-run ULTIMATE"
     echo "  archmode reset"
     echo "  archmode update"
 }
@@ -1534,7 +1762,6 @@ case "$command" in
         list_profiles
         ;;
     enable)
-        # Convert to uppercase for case-insensitive matching
         argument=$(echo "$argument" | tr '[:lower:]' '[:upper:]')
         case "$argument" in
             GAMEMODE) enable_gamemode ;;
@@ -1555,9 +1782,63 @@ case "$command" in
         esac
         ;;
     profile)
-        # Convert to uppercase for case-insensitive matching
         argument=$(echo "$argument" | tr '[:lower:]' '[:upper:]')
         apply_profile "$argument"
+        ;;
+    plugins)
+        case "${argument,,}" in
+            list) plugin_list ;;
+            start)
+                if [ -z "${3:-}" ]; then
+                    echo -e "${RED}✗ No plugin specified${NC}"
+                    exit 1
+                fi
+                plugin_start "$3"
+                ;;
+            stop)
+                if [ -z "${3:-}" ]; then
+                    echo -e "${RED}✗ No plugin specified${NC}"
+                    exit 1
+                fi
+                plugin_stop "$3"
+                ;;
+            status)
+                if [ -z "${3:-}" ]; then
+                    echo -e "${RED}✗ No plugin specified${NC}"
+                    exit 1
+                fi
+                plugin_status "$3"
+                ;;
+            *)
+                echo -e "${RED}✗ Unknown plugin command${NC}"
+                echo "Use: archmode plugins [list|start|stop|status]"
+                exit 1
+                ;;
+        esac
+        ;;
+    hooks)
+        case "${argument,,}" in
+            list) list_hooks ;;
+            create)
+                if [ -z "${3:-}" ]; then
+                    echo -e "${RED}✗ No mode specified${NC}"
+                    exit 1
+                fi
+                create_example_hooks "${3^^}"
+                ;;
+            *)
+                echo -e "${RED}✗ Unknown hooks command${NC}"
+                echo "Use: archmode hooks [list|create]"
+                exit 1
+                ;;
+        esac
+        ;;
+    dry-run)
+        if [ -z "$argument" ]; then
+            echo -e "${RED}✗ No mode specified${NC}"
+            exit 1
+        fi
+        dry_run_mode "${argument^^}"
         ;;
     reset)
         reset_all
@@ -1580,6 +1861,9 @@ case "$command" in
         ;;
     uninstall)
         uninstall_archmode
+        ;;
+    check)
+        check_dependencies
         ;;
     help|--help|-h)
         show_help
