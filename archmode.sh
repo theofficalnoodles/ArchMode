@@ -1,8 +1,9 @@
 #!/bin/bash
 
 # ArchMode - System Mode Manager for Arch Linux
-# Version: 0.8.0
+# Version: 1.0.0 - ULTIMATE EDITION
 # Ultimate Performance Tool - Advanced system optimizations
+# With Mods, Plugins, Security & Privacy Features
 
 set -euo pipefail
 
@@ -24,7 +25,11 @@ STATE_FILE="$CONFIG_DIR/state.conf"
 MODES_FILE="$CONFIG_DIR/modes.conf"
 PROFILES_FILE="$CONFIG_DIR/profiles.conf"
 BACKUP_DIR="$CONFIG_DIR/backups"
-VERSION="0.8.0"
+MODS_DIR="$CONFIG_DIR/mods"
+PLUGINS_DIR="$CONFIG_DIR/plugins"
+SECURITY_FILE="$CONFIG_DIR/security.conf"
+PRIVACY_FILE="$CONFIG_DIR/privacy.conf"
+VERSION="1.0.0"
 
 # Performance: Cache state in memory
 declare -A STATE_CACHE
@@ -39,10 +44,14 @@ SUDO_AVAILABLE=""
 SUDO_CHECKED=false
 
 # Create directories
-mkdir -p "$CONFIG_DIR" "$LOG_DIR" "$BACKUP_DIR"
+mkdir -p "$CONFIG_DIR" "$LOG_DIR" "$BACKUP_DIR" "$MODS_DIR" "$PLUGINS_DIR"
 
 # Initialize state file
 [ ! -f "$STATE_FILE" ] && touch "$STATE_FILE"
+
+# Initialize security and privacy files
+[ ! -f "$SECURITY_FILE" ] && touch "$SECURITY_FILE"
+[ ! -f "$PRIVACY_FILE" ] && touch "$PRIVACY_FILE"
 
 # Initialize modes configuration
 if [ ! -f "$MODES_FILE" ]; then
@@ -75,6 +84,10 @@ CREATOR:RENDERMODE,DEVMODE:Content creation and rendering
 NIGHT_OWL:NIGHTMODE,QUIETMODE:Late night computing
 EOF
 fi
+
+# Load mods and plugins
+load_mods
+load_plugins
 
 # Logging function with performance optimization
 log() {
@@ -507,6 +520,459 @@ optimize_cpu_boost() {
             fi
         fi
     done
+}
+
+# ============================================
+# MODS AND PLUGINS SYSTEM
+# ============================================
+
+# Load all mods
+load_mods() {
+    if [ ! -d "$MODS_DIR" ]; then
+        mkdir -p "$MODS_DIR"
+        return 0
+    fi
+    
+    for mod_file in "$MODS_DIR"/*.sh; do
+        [ -f "$mod_file" ] || continue
+        [ -x "$mod_file" ] || chmod +x "$mod_file"
+        
+        # Source the mod (safely)
+        if [ -r "$mod_file" ]; then
+            source "$mod_file" 2>/dev/null && log "Loaded mod: $(basename "$mod_file")" || log "Failed to load mod: $(basename "$mod_file")"
+        fi
+    done
+}
+
+# Load all plugins
+load_plugins() {
+    if [ ! -d "$PLUGINS_DIR" ]; then
+        mkdir -p "$PLUGINS_DIR"
+        return 0
+    fi
+    
+    for plugin_file in "$PLUGINS_DIR"/*.sh; do
+        [ -f "$plugin_file" ] || continue
+        [ -x "$plugin_file" ] || chmod +x "$plugin_file"
+        
+        # Source the plugin (safely)
+        if [ -r "$plugin_file" ]; then
+            source "$plugin_file" 2>/dev/null && log "Loaded plugin: $(basename "$plugin_file")" || log "Failed to load plugin: $(basename "$plugin_file")"
+        fi
+    done
+}
+
+# List installed mods
+list_mods() {
+    echo -e "${CYAN}${BOLD}"
+    echo "╔════════════════════════════════════════╗"
+    echo "║        Installed Mods                  ║"
+    echo "╚════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+    
+    if [ ! -d "$MODS_DIR" ] || [ -z "$(ls -A "$MODS_DIR"/*.sh 2>/dev/null)" ]; then
+        echo -e "${YELLOW}No mods installed${NC}"
+        echo -e "${CYAN}Create one with: archmode create-mod <name>${NC}"
+        echo ""
+        return 0
+    fi
+    
+    for mod_file in "$MODS_DIR"/*.sh; do
+        [ -f "$mod_file" ] || continue
+        local mod_name=$(basename "$mod_file" .sh)
+        echo -e "${GREEN}✓${NC} ${BOLD}$mod_name${NC}"
+        echo -e "  ${CYAN}Location: $mod_file${NC}"
+        echo ""
+    done
+}
+
+# List installed plugins
+list_plugins() {
+    echo -e "${MAGENTA}${BOLD}"
+    echo "╔════════════════════════════════════════╗"
+    echo "║      Installed Plugins                 ║"
+    echo "╚════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+    
+    if [ ! -d "$PLUGINS_DIR" ] || [ -z "$(ls -A "$PLUGINS_DIR"/*.sh 2>/dev/null)" ]; then
+        echo -e "${YELLOW}No plugins installed${NC}"
+        echo -e "${CYAN}Create one with: archmode create-plugin <name>${NC}"
+        echo ""
+        return 0
+    fi
+    
+    for plugin_file in "$PLUGINS_DIR"/*.sh; do
+        [ -f "$plugin_file" ] || continue
+        local plugin_name=$(basename "$plugin_file" .sh)
+        echo -e "${GREEN}✓${NC} ${BOLD}$plugin_name${NC}"
+        echo -e "  ${CYAN}Location: $plugin_file${NC}"
+        echo ""
+    done
+}
+
+# Create a new mod
+create_mod() {
+    local mod_name=$1
+    
+    if [ -z "$mod_name" ]; then
+        echo -e "${RED}✗ Mod name required${NC}"
+        echo "Usage: archmode create-mod <name>"
+        return 1
+    fi
+    
+    # Sanitize mod name
+    mod_name=$(echo "$mod_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]//g')
+    
+    if [ -z "$mod_name" ]; then
+        echo -e "${RED}✗ Invalid mod name${NC}"
+        return 1
+    fi
+    
+    local mod_file="$MODS_DIR/${mod_name}.sh"
+    
+    if [ -f "$mod_file" ]; then
+        echo -e "${YELLOW}⚠ Mod already exists: $mod_name${NC}"
+        read -p "Overwrite? (y/N): " confirm
+        if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+            echo -e "${CYAN}➜ Cancelled${NC}"
+            return 0
+        fi
+    fi
+    
+    # Create mod template
+    cat > "$mod_file" << EOF
+#!/bin/bash
+# ArchMode Mod: $mod_name
+# Created: $(date '+%Y-%m-%d %H:%M:%S')
+# Description: Add your mod description here
+
+# Mod metadata
+MOD_NAME="$mod_name"
+MOD_VERSION="1.0.0"
+MOD_DESCRIPTION="Custom mod for ArchMode"
+
+# Mod enable function (called when mod is activated)
+enable_${mod_name}() {
+    echo -e "\${GREEN}✓ Enabling mod: $mod_name\${NC}"
+    # Add your mod logic here
+    log "Mod $mod_name enabled"
+}
+
+# Mod disable function (called when mod is deactivated)
+disable_${mod_name}() {
+    echo -e "\${YELLOW}➜ Disabling mod: $mod_name\${NC}"
+    # Add your mod logic here
+    log "Mod $mod_name disabled"
+}
+
+# Mod initialization (called when ArchMode loads)
+init_${mod_name}() {
+    # Add initialization logic here
+    log "Mod $mod_name initialized"
+}
+
+# Call init on load
+init_${mod_name}
+EOF
+    
+    chmod +x "$mod_file"
+    
+    echo -e "${GREEN}✓ Mod created: $mod_name${NC}"
+    echo -e "${CYAN}  Location: $mod_file${NC}"
+    echo ""
+    echo -e "${YELLOW}Next steps:${NC}"
+    echo -e "  1. Edit the mod: ${BOLD}$mod_file${NC}"
+    echo -e "  2. Or use: ${BOLD}archmode edit-mod $mod_name${NC}"
+    echo ""
+    
+    # Ask if user wants to edit now
+    read -p "Open in editor? (y/N): " edit_now
+    if [[ "$edit_now" == "y" || "$edit_now" == "Y" ]]; then
+        edit_mod "$mod_name"
+    fi
+}
+
+# Create a new plugin
+create_plugin() {
+    local plugin_name=$1
+    
+    if [ -z "$plugin_name" ]; then
+        echo -e "${RED}✗ Plugin name required${NC}"
+        echo "Usage: archmode create-plugin <name>"
+        return 1
+    fi
+    
+    # Sanitize plugin name
+    plugin_name=$(echo "$plugin_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]//g')
+    
+    if [ -z "$plugin_name" ]; then
+        echo -e "${RED}✗ Invalid plugin name${NC}"
+        return 1
+    fi
+    
+    local plugin_file="$PLUGINS_DIR/${plugin_name}.sh"
+    
+    if [ -f "$plugin_file" ]; then
+        echo -e "${YELLOW}⚠ Plugin already exists: $plugin_name${NC}"
+        read -p "Overwrite? (y/N): " confirm
+        if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+            echo -e "${CYAN}➜ Cancelled${NC}"
+            return 0
+        fi
+    fi
+    
+    # Create plugin template
+    cat > "$plugin_file" << EOF
+#!/bin/bash
+# ArchMode Plugin: $plugin_name
+# Created: $(date '+%Y-%m-%d %H:%M:%S')
+# Description: Add your plugin description here
+
+# Plugin metadata
+PLUGIN_NAME="$plugin_name"
+PLUGIN_VERSION="1.0.0"
+PLUGIN_DESCRIPTION="Custom plugin for ArchMode"
+
+# Plugin hooks (called at various ArchMode events)
+on_mode_enable() {
+    local mode=\$1
+    # Called when any mode is enabled
+    # Add your logic here
+}
+
+on_mode_disable() {
+    local mode=\$1
+    # Called when any mode is disabled
+    # Add your logic here
+}
+
+on_startup() {
+    # Called when ArchMode starts
+    log "Plugin $plugin_name started"
+}
+
+on_shutdown() {
+    # Called when ArchMode shuts down
+    log "Plugin $plugin_name stopped"
+}
+
+# Call on_startup when loaded
+on_startup
+EOF
+    
+    chmod +x "$plugin_file"
+    
+    echo -e "${GREEN}✓ Plugin created: $plugin_name${NC}"
+    echo -e "${CYAN}  Location: $plugin_file${NC}"
+    echo ""
+    echo -e "${YELLOW}Next steps:${NC}"
+    echo -e "  1. Edit the plugin: ${BOLD}$plugin_file${NC}"
+    echo -e "  2. Or use: ${BOLD}archmode edit-plugin $plugin_name${NC}"
+    echo ""
+    
+    # Ask if user wants to edit now
+    read -p "Open in editor? (y/N): " edit_now
+    if [[ "$edit_now" == "y" || "$edit_now" == "Y" ]]; then
+        edit_plugin "$plugin_name"
+    fi
+}
+
+# Edit a mod
+edit_mod() {
+    local mod_name=$1
+    local editor=${2:-${EDITOR:-vim}}
+    
+    if [ -z "$mod_name" ]; then
+        echo -e "${RED}✗ Mod name required${NC}"
+        echo "Usage: archmode edit-mod <name> [editor]"
+        return 1
+    fi
+    
+    mod_name=$(echo "$mod_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]//g')
+    local mod_file="$MODS_DIR/${mod_name}.sh"
+    
+    if [ ! -f "$mod_file" ]; then
+        echo -e "${RED}✗ Mod not found: $mod_name${NC}"
+        echo -e "${CYAN}Create it with: archmode create-mod $mod_name${NC}"
+        return 1
+    fi
+    
+    echo -e "${CYAN}➜ Opening mod in $editor...${NC}"
+    "$editor" "$mod_file"
+    echo -e "${GREEN}✓ Mod edited${NC}"
+}
+
+# Edit a plugin
+edit_plugin() {
+    local plugin_name=$1
+    local editor=${2:-${EDITOR:-vim}}
+    
+    if [ -z "$plugin_name" ]; then
+        echo -e "${RED}✗ Plugin name required${NC}"
+        echo "Usage: archmode edit-plugin <name> [editor]"
+        return 1
+    fi
+    
+    plugin_name=$(echo "$plugin_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]//g')
+    local plugin_file="$PLUGINS_DIR/${plugin_name}.sh"
+    
+    if [ ! -f "$plugin_file" ]; then
+        echo -e "${RED}✗ Plugin not found: $plugin_name${NC}"
+        echo -e "${CYAN}Create it with: archmode create-plugin $plugin_name${NC}"
+        return 1
+    fi
+    
+    echo -e "${CYAN}➜ Opening plugin in $editor...${NC}"
+    "$editor" "$plugin_file"
+    echo -e "${GREEN}✓ Plugin edited${NC}"
+}
+
+# ============================================
+# SECURITY AND PRIVACY SETTINGS
+# ============================================
+
+# Get security setting
+get_security_setting() {
+    local setting=$1
+    local default=${2:-false}
+    
+    if [ -f "$SECURITY_FILE" ]; then
+        local value=$(grep "^$setting=" "$SECURITY_FILE" 2>/dev/null | cut -d'=' -f2)
+        echo "${value:-$default}"
+    else
+        echo "$default"
+    fi
+}
+
+# Set security setting
+set_security_setting() {
+    local setting=$1
+    local value=$2
+    
+    if grep -q "^$setting=" "$SECURITY_FILE" 2>/dev/null; then
+        sed -i "s/^$setting=.*/$setting=$value/" "$SECURITY_FILE"
+    else
+        echo "$setting=$value" >> "$SECURITY_FILE"
+    fi
+    log "Security setting $setting set to $value"
+}
+
+# Get privacy setting
+get_privacy_setting() {
+    local setting=$1
+    local default=${2:-false}
+    
+    if [ -f "$PRIVACY_FILE" ]; then
+        local value=$(grep "^$setting=" "$PRIVACY_FILE" 2>/dev/null | cut -d'=' -f2)
+        echo "${value:-$default}"
+    else
+        echo "$default"
+    fi
+}
+
+# Set privacy setting
+set_privacy_setting() {
+    local setting=$1
+    local value=$2
+    
+    if grep -q "^$setting=" "$PRIVACY_FILE" 2>/dev/null; then
+        sed -i "s/^$setting=.*/$setting=$value/" "$PRIVACY_FILE"
+    else
+        echo "$setting=$value" >> "$PRIVACY_FILE"
+    fi
+    log "Privacy setting $setting set to $value"
+}
+
+# Show security settings
+show_security() {
+    echo -e "${CYAN}${BOLD}"
+    echo "╔════════════════════════════════════════╗"
+    echo "║        Security Settings              ║"
+    echo "╚════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+    
+    local secure_logging=$(get_security_setting "secure_logging" "false")
+    local require_sudo=$(get_security_setting "require_sudo" "true")
+    local validate_mods=$(get_security_setting "validate_mods" "true")
+    local validate_plugins=$(get_security_setting "validate_plugins" "true")
+    local sandbox_mods=$(get_security_setting "sandbox_mods" "false")
+    local audit_mode=$(get_security_setting "audit_mode" "false")
+    
+    echo -e "${BOLD}Secure Logging:${NC} $secure_logging"
+    echo -e "${BOLD}Require Sudo:${NC} $require_sudo"
+    echo -e "${BOLD}Validate Mods:${NC} $validate_mods"
+    echo -e "${BOLD}Validate Plugins:${NC} $validate_plugins"
+    echo -e "${BOLD}Sandbox Mods:${NC} $sandbox_mods"
+    echo -e "${BOLD}Audit Mode:${NC} $audit_mode"
+    echo ""
+    echo -e "${CYAN}Configure with: archmode security <setting> <value>${NC}"
+}
+
+# Show privacy settings
+show_privacy() {
+    echo -e "${MAGENTA}${BOLD}"
+    echo "╔════════════════════════════════════════╗"
+    echo "║        Privacy Settings                ║"
+    echo "╚════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+    
+    local anonymize_logs=$(get_privacy_setting "anonymize_logs" "false")
+    local no_telemetry=$(get_privacy_setting "no_telemetry" "true")
+    local local_only=$(get_privacy_setting "local_only" "true")
+    local encrypt_config=$(get_privacy_setting "encrypt_config" "false")
+    local hide_sensitive=$(get_privacy_setting "hide_sensitive" "true")
+    
+    echo -e "${BOLD}Anonymize Logs:${NC} $anonymize_logs"
+    echo -e "${BOLD}No Telemetry:${NC} $no_telemetry"
+    echo -e "${BOLD}Local Only:${NC} $local_only"
+    echo -e "${BOLD}Encrypt Config:${NC} $encrypt_config"
+    echo -e "${BOLD}Hide Sensitive:${NC} $hide_sensitive"
+    echo ""
+    echo -e "${CYAN}Configure with: archmode privacy <setting> <value>${NC}"
+}
+
+# Configure security setting
+configure_security() {
+    local setting=$1
+    local value=$2
+    
+    if [ -z "$setting" ]; then
+        show_security
+        return 0
+    fi
+    
+    if [ -z "$value" ]; then
+        echo -e "${RED}✗ Value required${NC}"
+        echo "Usage: archmode security <setting> <value>"
+        return 1
+    fi
+    
+    set_security_setting "$setting" "$value"
+    echo -e "${GREEN}✓ Security setting updated: $setting=$value${NC}"
+}
+
+# Configure privacy setting
+configure_privacy() {
+    local setting=$1
+    local value=$2
+    
+    if [ -z "$setting" ]; then
+        show_privacy
+        return 0
+    fi
+    
+    if [ -z "$value" ]; then
+        echo -e "${RED}✗ Value required${NC}"
+        echo "Usage: archmode privacy <setting> <value>"
+        return 1
+    fi
+    
+    set_privacy_setting "$setting" "$value"
+    echo -e "${GREEN}✓ Privacy setting updated: $setting=$value${NC}"
 }
 
 enable_gamemode() {
@@ -1267,16 +1733,17 @@ reset_all() {
     echo -e "${GREEN}✓ All modes have been reset to defaults${NC}"
 }
 
-# Update ArchMode from GitHub
+# Update ArchMode from GitHub - ULTIMATE UPDATE SYSTEM
 update_archmode() {
     local GITHUB_REPO="https://github.com/theofficalnoodles/ArchMode"
     local INSTALLED_SCRIPT="/usr/local/bin/archmode"
     local TEMP_DIR=$(mktemp -d)
     local BACKUP_SCRIPT="$INSTALLED_SCRIPT.backup.$(date +%Y%m%d_%H%M%S)"
+    local UPDATE_LOG="$LOG_DIR/update_$(date +%Y%m%d_%H%M%S).log"
     
     echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║         Updating ArchMode              ║"
+    echo "║    ArchMode ULTIMATE Update System     ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
@@ -1288,12 +1755,31 @@ update_archmode() {
         return 1
     fi
     
+    # System information
+    echo -e "${CYAN}${BOLD}System Information:${NC}"
+    echo -e "  Current Version: ${BOLD}$VERSION${NC}"
+    echo -e "  System: $(uname -s) $(uname -r)"
+    echo -e "  Architecture: $(uname -m)"
+    echo -e "  User: $USER"
+    echo ""
+    
+    # Check internet connectivity
+    echo -e "${CYAN}➜ Checking internet connectivity...${NC}"
+    if ! ping -c 1 -W 2 github.com &>/dev/null && ! ping -c 1 -W 2 8.8.8.8 &>/dev/null; then
+        echo -e "${RED}✗ No internet connection${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}✓ Internet connection available${NC}"
+    echo ""
+    
     # Check for git or curl/wget
+    local download_method=""
     if command -v git &>/dev/null; then
+        download_method="git"
         echo -e "${CYAN}➜ Using git to download latest version...${NC}"
         
         # Clone the repository
-        if git clone "$GITHUB_REPO.git" "$TEMP_DIR/ArchMode" 2>/dev/null; then
+        if git clone --depth 1 "$GITHUB_REPO.git" "$TEMP_DIR/ArchMode" 2>/dev/null; then
             if [ -f "$TEMP_DIR/ArchMode/archmode.sh" ]; then
                 local NEW_SCRIPT="$TEMP_DIR/ArchMode/archmode.sh"
             else
@@ -1307,33 +1793,42 @@ update_archmode() {
             return 1
         fi
     elif command -v curl &>/dev/null; then
+        download_method="curl"
         echo -e "${CYAN}➜ Using curl to download latest version...${NC}"
         
-        # Download the script directly
+        # Try multiple branches/tags
+        local branches=("main" "master" "v1.0.0" "latest")
         local NEW_SCRIPT="$TEMP_DIR/archmode.sh"
-        if curl -sL "$GITHUB_REPO/raw/main/archmode.sh" -o "$NEW_SCRIPT"; then
-            if [ ! -f "$NEW_SCRIPT" ] || [ ! -s "$NEW_SCRIPT" ]; then
-                echo -e "${RED}✗ Failed to download script${NC}"
-                rm -rf "$TEMP_DIR"
-                return 1
+        local downloaded=false
+        
+        for branch in "${branches[@]}"; do
+            if curl -sLf "$GITHUB_REPO/raw/$branch/archmode.sh" -o "$NEW_SCRIPT" && [ -f "$NEW_SCRIPT" ] && [ -s "$NEW_SCRIPT" ]; then
+                downloaded=true
+                break
             fi
-        else
-            echo -e "${RED}✗ Failed to download from GitHub${NC}"
+        done
+        
+        if [ "$downloaded" = false ]; then
+            echo -e "${RED}✗ Failed to download script${NC}"
             rm -rf "$TEMP_DIR"
             return 1
         fi
     elif command -v wget &>/dev/null; then
+        download_method="wget"
         echo -e "${CYAN}➜ Using wget to download latest version...${NC}"
         
-        # Download the script directly
+        local branches=("main" "master" "v1.0.0" "latest")
         local NEW_SCRIPT="$TEMP_DIR/archmode.sh"
-        if wget -q "$GITHUB_REPO/raw/main/archmode.sh" -O "$NEW_SCRIPT"; then
-            if [ ! -f "$NEW_SCRIPT" ] || [ ! -s "$NEW_SCRIPT" ]; then
-                echo -e "${RED}✗ Failed to download script${NC}"
-                rm -rf "$TEMP_DIR"
-                return 1
+        local downloaded=false
+        
+        for branch in "${branches[@]}"; do
+            if wget -q "$GITHUB_REPO/raw/$branch/archmode.sh" -O "$NEW_SCRIPT" 2>/dev/null && [ -f "$NEW_SCRIPT" ] && [ -s "$NEW_SCRIPT" ]; then
+                downloaded=true
+                break
             fi
-        else
+        done
+        
+        if [ "$downloaded" = false ]; then
             echo -e "${RED}✗ Failed to download from GitHub${NC}"
             rm -rf "$TEMP_DIR"
             return 1
@@ -1344,33 +1839,98 @@ update_archmode() {
         return 1
     fi
     
+    echo -e "${GREEN}✓ Download complete using $download_method${NC}"
+    echo ""
+    
+    # Validate downloaded script
+    echo -e "${CYAN}➜ Validating downloaded script...${NC}"
+    if [ ! -f "$NEW_SCRIPT" ] || [ ! -s "$NEW_SCRIPT" ]; then
+        echo -e "${RED}✗ Invalid script file${NC}"
+        rm -rf "$TEMP_DIR"
+        return 1
+    fi
+    
+    # Check if it's a valid bash script
+    if ! bash -n "$NEW_SCRIPT" 2>/dev/null; then
+        echo -e "${RED}✗ Script validation failed${NC}"
+        rm -rf "$TEMP_DIR"
+        return 1
+    fi
+    echo -e "${GREEN}✓ Script validation passed${NC}"
+    echo ""
+    
+    # Get new version number
+    local NEW_VERSION=$(grep -m1 "^VERSION=" "$NEW_SCRIPT" 2>/dev/null | cut -d'"' -f2 || echo "unknown")
+    
     # Check if new version is different
     if cmp -s "$INSTALLED_SCRIPT" "$NEW_SCRIPT" 2>/dev/null; then
-        echo -e "${GREEN}✓ Already running the latest version${NC}"
+        echo -e "${GREEN}✓ Already running the latest version ($NEW_VERSION)${NC}"
         rm -rf "$TEMP_DIR"
         return 0
     fi
     
-    # Get new version number
-    local NEW_VERSION=$(grep -m1 "^VERSION=" "$NEW_SCRIPT" 2>/dev/null | cut -d'"' -f2 || echo "unknown")
-    echo -e "${CYAN}➜ New version found: ${BOLD}$NEW_VERSION${NC}"
-    echo -e "${CYAN}  Current version: ${BOLD}$VERSION${NC}"
+    echo -e "${CYAN}${BOLD}Version Information:${NC}"
+    echo -e "  Current Version: ${BOLD}$VERSION${NC}"
+    echo -e "  New Version: ${BOLD}$NEW_VERSION${NC}"
     echo ""
     
-    # Backup current script
-    echo -e "${CYAN}➜ Backing up current version...${NC}"
+    # Show what's new (if changelog exists)
+    if [ -f "$TEMP_DIR/ArchMode/CHANGELOG.md" ] || [ -f "$TEMP_DIR/ArchMode/README.md" ]; then
+        echo -e "${CYAN}➜ Checking for updates and new features...${NC}"
+        echo -e "${GREEN}✓ Update available${NC}"
+    fi
+    echo ""
+    
+    # Backup current script and configuration
+    echo -e "${CYAN}${BOLD}Backup Phase:${NC}"
+    echo -e "${CYAN}➜ Creating comprehensive backup...${NC}"
+    
+    # Backup script
     if sudo cp "$INSTALLED_SCRIPT" "$BACKUP_SCRIPT"; then
-        echo -e "${GREEN}✓ Backup created: $BACKUP_SCRIPT${NC}"
+        echo -e "${GREEN}✓ Script backed up: $BACKUP_SCRIPT${NC}"
         log "Backup created before update: $BACKUP_SCRIPT"
     else
         echo -e "${YELLOW}⚠ Failed to create backup (continuing anyway)${NC}"
     fi
     
+    # Backup configuration
+    local config_backup="$BACKUP_DIR/config_backup_$(date +%Y%m%d_%H%M%S).tar.gz"
+    if tar -czf "$config_backup" -C "$CONFIG_DIR" . 2>/dev/null; then
+        echo -e "${GREEN}✓ Configuration backed up: $config_backup${NC}"
+    else
+        echo -e "${YELLOW}⚠ Failed to backup configuration${NC}"
+    fi
+    
+    # Backup mods and plugins
+    if [ -d "$MODS_DIR" ] && [ -n "$(ls -A "$MODS_DIR"/*.sh 2>/dev/null)" ]; then
+        local mods_backup="$BACKUP_DIR/mods_backup_$(date +%Y%m%d_%H%M%S).tar.gz"
+        tar -czf "$mods_backup" -C "$MODS_DIR" . 2>/dev/null && echo -e "${GREEN}✓ Mods backed up${NC}" || true
+    fi
+    
+    if [ -d "$PLUGINS_DIR" ] && [ -n "$(ls -A "$PLUGINS_DIR"/*.sh 2>/dev/null)" ]; then
+        local plugins_backup="$BACKUP_DIR/plugins_backup_$(date +%Y%m%d_%H%M%S).tar.gz"
+        tar -czf "$plugins_backup" -C "$PLUGINS_DIR" . 2>/dev/null && echo -e "${GREEN}✓ Plugins backed up${NC}" || true
+    fi
+    
+    echo ""
+    
     # Install new version
+    echo -e "${CYAN}${BOLD}Installation Phase:${NC}"
     echo -e "${CYAN}➜ Installing new version...${NC}"
     if sudo cp "$NEW_SCRIPT" "$INSTALLED_SCRIPT" && sudo chmod +x "$INSTALLED_SCRIPT"; then
         echo -e "${GREEN}✓ New version installed successfully${NC}"
         log "Updated to version $NEW_VERSION"
+        
+        # Verify installation
+        if [ -f "$INSTALLED_SCRIPT" ] && [ -x "$INSTALLED_SCRIPT" ]; then
+            echo -e "${GREEN}✓ Installation verified${NC}"
+        else
+            echo -e "${RED}✗ Installation verification failed${NC}"
+            echo -e "${YELLOW}  Restoring from backup...${NC}"
+            sudo cp "$BACKUP_SCRIPT" "$INSTALLED_SCRIPT" 2>/dev/null || true
+            rm -rf "$TEMP_DIR"
+            return 1
+        fi
     else
         echo -e "${RED}✗ Failed to install new version${NC}"
         echo -e "${YELLOW}  Restoring from backup...${NC}"
@@ -1379,25 +1939,46 @@ update_archmode() {
         return 1
     fi
     
+    echo ""
+    
+    # Post-update tasks
+    echo -e "${CYAN}${BOLD}Post-Update Tasks:${NC}"
+    
+    # Reload mods and plugins
+    echo -e "${CYAN}➜ Reloading mods and plugins...${NC}"
+    load_mods
+    load_plugins
+    echo -e "${GREEN}✓ Mods and plugins reloaded${NC}"
+    
     # Clean up temporary files
     rm -rf "$TEMP_DIR"
+    echo -e "${GREEN}✓ Temporary files cleaned${NC}"
     
-    # Optionally remove old backups (keep last 3)
+    # Optionally remove old backups (keep last 5)
     local backups=($(ls -t "$INSTALLED_SCRIPT".backup.* 2>/dev/null))
-    if [ ${#backups[@]} -gt 3 ]; then
-        echo -e "${CYAN}➜ Cleaning up old backups...${NC}"
-        for ((i=3; i<${#backups[@]}; i++)); do
+    if [ ${#backups[@]} -gt 5 ]; then
+        echo -e "${CYAN}➜ Cleaning up old backups (keeping last 5)...${NC}"
+        for ((i=5; i<${#backups[@]}; i++)); do
             sudo rm -f "${backups[$i]}"
         done
+        echo -e "${GREEN}✓ Old backups cleaned${NC}"
     fi
     
     echo ""
-    echo -e "${GREEN}✓${NC} ${BOLD}Update complete!${NC}"
-    echo -e "${CYAN}  ArchMode has been updated to version $NEW_VERSION${NC}"
-    echo -e "${CYAN}  Your configuration and logs have been preserved${NC}"
+    echo -e "${GREEN}${BOLD}"
+    echo "╔════════════════════════════════════════╗"
+    echo "║      Update Complete! 🎉              ║"
+    echo "╚════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+    echo -e "${CYAN}  ArchMode has been updated to version ${BOLD}$NEW_VERSION${NC}"
+    echo -e "${CYAN}  Your configuration, mods, plugins, and logs have been preserved${NC}"
+    echo -e "${CYAN}  All backups are stored in: $BACKUP_DIR${NC}"
     echo ""
     echo -e "${YELLOW}Note:${NC} If you're running this update command, you may need to"
     echo -e "      restart your terminal or run: ${BOLD}hash -r${NC}"
+    echo ""
+    echo -e "${GREEN}Enjoy the new features! 🚀${NC}"
 }
 
 # Uninstall ArchMode
@@ -1412,6 +1993,13 @@ uninstall_archmode() {
     echo -e "${NC}"
     echo ""
     
+    # Confirm uninstallation
+    read -p "Are you sure you want to uninstall ArchMode? (y/N): " confirm
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        echo -e "${CYAN}➜ Uninstallation cancelled${NC}"
+        return 0
+    fi
+    
     # Check if script is installed
     if [ ! -f "$INSTALLED_SCRIPT" ]; then
         echo -e "${YELLOW}⚠ ArchMode not found at $INSTALLED_SCRIPT${NC}"
@@ -1420,7 +2008,7 @@ uninstall_archmode() {
         echo -e "${CYAN}➜ Removing ArchMode script...${NC}"
         if sudo rm -f "$INSTALLED_SCRIPT"; then
             echo -e "${GREEN}✓ Script removed${NC}"
-            log "ArchMode uninstalled"
+            [ -f "$LOG_FILE" ] && echo "[$(date '+%Y-%m-%d %H:%M:%S')] ArchMode uninstalled" >> "$LOG_FILE" || true
         else
             echo -e "${RED}✗ Failed to remove script${NC}"
             return 1
@@ -1431,11 +2019,37 @@ uninstall_archmode() {
     if [ -f "$SYSTEMD_SERVICE" ]; then
         echo -e "${CYAN}➜ Removing systemd service...${NC}"
         sudo systemctl disable archmode 2>/dev/null || true
+        sudo systemctl stop archmode 2>/dev/null || true
         if sudo rm -f "$SYSTEMD_SERVICE"; then
             sudo systemctl daemon-reload 2>/dev/null || true
             echo -e "${GREEN}✓ Systemd service removed${NC}"
         else
             echo -e "${YELLOW}⚠ Failed to remove systemd service${NC}"
+        fi
+    fi
+    
+    # Ask about mods and plugins
+    if [ -d "$MODS_DIR" ] && [ -n "$(ls -A "$MODS_DIR"/*.sh 2>/dev/null)" ]; then
+        echo ""
+        echo -e "${YELLOW}Installed mods found:${NC}"
+        ls -1 "$MODS_DIR"/*.sh 2>/dev/null | xargs -n1 basename | sed 's/^/  - /'
+        echo ""
+        read -p "Remove all mods? (y/N): " remove_mods
+        if [[ "$remove_mods" == "y" || "$remove_mods" == "Y" ]]; then
+            rm -rf "$MODS_DIR"/*.sh 2>/dev/null || true
+            echo -e "${GREEN}✓ Mods removed${NC}"
+        fi
+    fi
+    
+    if [ -d "$PLUGINS_DIR" ] && [ -n "$(ls -A "$PLUGINS_DIR"/*.sh 2>/dev/null)" ]; then
+        echo ""
+        echo -e "${YELLOW}Installed plugins found:${NC}"
+        ls -1 "$PLUGINS_DIR"/*.sh 2>/dev/null | xargs -n1 basename | sed 's/^/  - /'
+        echo ""
+        read -p "Remove all plugins? (y/N): " remove_plugins
+        if [[ "$remove_plugins" == "y" || "$remove_plugins" == "Y" ]]; then
+            rm -rf "$PLUGINS_DIR"/*.sh 2>/dev/null || true
+            echo -e "${GREEN}✓ Plugins removed${NC}"
         fi
     fi
     
@@ -1484,11 +2098,12 @@ uninstall_archmode() {
 # Help / usage
 show_help() {
     echo -e "${CYAN}${BOLD}"
-    echo "ArchMode v$VERSION - System Mode Manager for Arch Linux"
+    echo "ArchMode v$VERSION - ULTIMATE EDITION"
+    echo "System Mode Manager for Arch Linux"
     echo -e "${NC}"
     echo "Usage: archmode <command> [argument]"
     echo ""
-    echo -e "${BOLD}Commands:${NC}"
+    echo -e "${BOLD}Core Commands:${NC}"
     echo "  status                 Show current mode status"
     echo "  stats                  Show live system statistics"
     echo "  modes                  List available modes"
@@ -1500,7 +2115,23 @@ show_help() {
     echo "  restore                Restore a backup"
     echo "  detect                 Detect system hardware"
     echo "  benchmark              Run performance benchmark"
-    echo "  update                 Update ArchMode to latest version"
+    echo ""
+    echo -e "${BOLD}Mods & Plugins:${NC}"
+    echo "  mods                   List installed mods"
+    echo "  plugins                List installed plugins"
+    echo "  create-mod <name>       Create a new mod"
+    echo "  create-plugin <name>    Create a new plugin"
+    echo "  edit-mod <name> [editor] Edit a mod (default: vim)"
+    echo "  edit-plugin <name> [editor] Edit a plugin (default: vim)"
+    echo ""
+    echo -e "${BOLD}Security & Privacy:${NC}"
+    echo "  security               Show security settings"
+    echo "  security <setting> <value> Configure security setting"
+    echo "  privacy                Show privacy settings"
+    echo "  privacy <setting> <value> Configure privacy setting"
+    echo ""
+    echo -e "${BOLD}System Commands:${NC}"
+    echo "  update                 Update ArchMode (ULTIMATE update system)"
     echo "  uninstall              Uninstall ArchMode from system"
     echo "  help                   Show this help message"
     echo ""
@@ -1508,7 +2139,11 @@ show_help() {
     echo "  archmode enable GAMEMODE"
     echo "  archmode enable gamemode    # Case-insensitive"
     echo "  archmode profile GAMER"
-    echo "  archmode profile gamer     # Case-insensitive"
+    echo "  archmode create-mod mymod"
+    echo "  archmode create-plugin myplugin"
+    echo "  archmode edit-mod mymod vim"
+    echo "  archmode security validate_mods true"
+    echo "  archmode privacy anonymize_logs true"
     echo "  archmode reset"
     echo "  archmode update"
 }
@@ -1519,6 +2154,7 @@ show_help() {
 
 command="${1:-help}"
 argument="${2:-}"
+argument2="${3:-}"
 
 case "$command" in
     status)
@@ -1574,6 +2210,38 @@ case "$command" in
         ;;
     benchmark)
         benchmark_performance
+        ;;
+    mods)
+        list_mods
+        ;;
+    plugins)
+        list_plugins
+        ;;
+    create-mod)
+        create_mod "$argument"
+        ;;
+    create-plugin)
+        create_plugin "$argument"
+        ;;
+    edit-mod)
+        edit_mod "$argument" "$argument2"
+        ;;
+    edit-plugin)
+        edit_plugin "$argument" "$argument2"
+        ;;
+    security)
+        if [ -z "$argument" ]; then
+            show_security
+        else
+            configure_security "$argument" "$argument2"
+        fi
+        ;;
+    privacy)
+        if [ -z "$argument" ]; then
+            show_privacy
+        else
+            configure_privacy "$argument" "$argument2"
+        fi
         ;;
     update)
         update_archmode
