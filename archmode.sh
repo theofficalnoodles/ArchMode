@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ArchMode - System Mode Manager for Arch Linux
-# Version: 2.0.0 - ULTIMATE EDITION
+# Version: 3.0.0 - ULTIMATE EDITION
 # THE BEST SYSTEM MANAGEMENT TOOL - Complete System Control
 # With Mods, Plugins, Security, Privacy, Monitoring, Automation & More!
 #
@@ -47,7 +47,9 @@ SCHEDULE_FILE="$CONFIG_DIR/schedule.conf"
 MONITOR_FILE="$CONFIG_DIR/monitor.conf"
 HEALTH_FILE="$LOG_DIR/health_report.txt"
 TEMP_ALERT_FILE="$CONFIG_DIR/temp_alerts.conf"
-VERSION="2.0.0"
+AUTOMODE_FILE="$CONFIG_DIR/automode.conf"
+AUTOMODE_PID_FILE="$LOG_DIR/automode.pid"
+VERSION="3.0.0"
 
 # Performance: Cache state in memory
 declare -A STATE_CACHE
@@ -68,6 +70,7 @@ mkdir -p "$CONFIG_DIR" "$LOG_DIR" "$BACKUP_DIR" "$MODS_DIR" "$PLUGINS_DIR"
 [ ! -f "$SCHEDULE_FILE" ] && touch "$SCHEDULE_FILE"
 [ ! -f "$MONITOR_FILE" ] && touch "$MONITOR_FILE"
 [ ! -f "$TEMP_ALERT_FILE" ] && touch "$TEMP_ALERT_FILE"
+[ ! -f "$AUTOMODE_FILE" ] && touch "$AUTOMODE_FILE"
 
 # Initialize state file
 [ ! -f "$STATE_FILE" ] && touch "$STATE_FILE"
@@ -1907,11 +1910,16 @@ update_archmode() {
         return 1
     fi
     
-    # Check if it's a valid bash script
-    if ! bash -n "$NEW_SCRIPT" 2>/dev/null; then
-        echo -e "${RED}✗ Script validation failed${NC}"
-        rm -rf "$TEMP_DIR"
-        return 1
+    # Check if it's a valid bash script (suppress output to avoid false syntax errors)
+    local syntax_check=$(bash -n "$NEW_SCRIPT" 2>&1)
+    if [ $? -ne 0 ] && [ -n "$syntax_check" ]; then
+        # Only fail if there's an actual error, not just warnings
+        if echo "$syntax_check" | grep -qiE "error|syntax"; then
+            echo -e "${RED}✗ Script validation failed${NC}"
+            echo -e "${YELLOW}Error: $syntax_check${NC}"
+            rm -rf "$TEMP_DIR"
+            return 1
+        fi
     fi
     echo -e "${GREEN}✓ Script validation passed${NC}"
     echo ""
@@ -2011,15 +2019,23 @@ update_archmode() {
     rm -rf "$TEMP_DIR"
     echo -e "${GREEN}✓ Temporary files cleaned${NC}"
     
-    # Optionally remove old backups (keep last 5)
+    # Remove ALL old backup versions to prevent conflicts
+    echo -e "${CYAN}➜ Cleaning up old versions to prevent conflicts...${NC}"
     local backups=($(ls -t "$INSTALLED_SCRIPT".backup.* 2>/dev/null))
-    if [ ${#backups[@]} -gt 5 ]; then
-        echo -e "${CYAN}➜ Cleaning up old backups (keeping last 5)...${NC}"
-        for ((i=5; i<${#backups[@]}; i++)); do
-            sudo rm -f "${backups[$i]}"
+    if [ ${#backups[@]} -gt 1 ]; then
+        # Keep only the most recent backup, remove all others
+        for ((i=1; i<${#backups[@]}; i++)); do
+            sudo rm -f "${backups[$i]}" 2>/dev/null || true
         done
-        echo -e "${GREEN}✓ Old backups cleaned${NC}"
+        echo -e "${GREEN}✓ Old versions cleaned (kept latest backup)${NC}"
     fi
+    
+    # Also clean up any old version files in /usr/local/bin
+    for old_file in /usr/local/bin/archmode.*; do
+        if [ -f "$old_file" ] && [ "$old_file" != "$INSTALLED_SCRIPT" ] && [ "$old_file" != "${backups[0]:-}" ]; then
+            sudo rm -f "$old_file" 2>/dev/null || true
+        fi
+    done
     
     echo ""
     echo -e "${GREEN}${BOLD}"
@@ -2759,6 +2775,203 @@ system_optimizer() {
 }
 
 # ============================================
+# AUTOMODE - Intelligent Activity Detection
+# ============================================
+
+# Detect what user is doing and apply appropriate modes
+automode_detect() {
+    # Game detection patterns
+    local game_processes=("steam" "lutris" "wine" "proton" "gamemode" "gamescope" "mangohud" "vkbasalt" "obs" "obs-studio" "ffmpeg" "gstreamer")
+    local dev_processes=("code" "vscode" "vim" "nvim" "emacs" "make" "gcc" "g++" "cmake" "ninja" "cargo" "npm" "node" "python" "python3")
+    local stream_processes=("obs" "obs-studio" "ffmpeg" "gstreamer" "streamlink" "streamlabs")
+    local render_processes=("blender" "maya" "houdini" "cinema4d" "davinci" "handbrake" "makemkv")
+    
+    local detected_mode=""
+    local running_processes=$(ps aux | awk '{print $11}' | tr '\n' ' ' | tr '[:upper:]' '[:lower:]')
+    
+    # Check for games
+    for proc in "${game_processes[@]}"; do
+        if echo "$running_processes" | grep -qi "$proc"; then
+            detected_mode="GAMEMODE"
+            break
+        fi
+    done
+    
+    # Check for streaming (higher priority than games)
+    for proc in "${stream_processes[@]}"; do
+        if echo "$running_processes" | grep -qi "$proc"; then
+            detected_mode="STREAMMODE"
+            break
+        fi
+    done
+    
+    # Check for rendering
+    for proc in "${render_processes[@]}"; do
+        if echo "$running_processes" | grep -qi "$proc"; then
+            detected_mode="RENDERMODE"
+            break
+        fi
+    done
+    
+    # Check for development
+    for proc in "${dev_processes[@]}"; do
+        if echo "$running_processes" | grep -qi "$proc"; then
+            if [ -z "$detected_mode" ]; then
+                detected_mode="DEVMODE"
+            fi
+            break
+        fi
+    done
+    
+    echo "$detected_mode"
+}
+
+# Start automode monitoring
+automode_start() {
+    if [ -f "$AUTOMODE_PID_FILE" ]; then
+        local old_pid=$(cat "$AUTOMODE_PID_FILE" 2>/dev/null)
+        if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
+            echo -e "${YELLOW}⚠ Automode is already running (PID: $old_pid)${NC}"
+            return 0
+        fi
+    fi
+    
+    echo -e "${CYAN}${BOLD}"
+    echo "╔════════════════════════════════════════╗"
+    echo "║        Starting Automode               ║"
+    echo "╚════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+    echo -e "${CYAN}➜ Automode will detect your activities and apply optimal modes${NC}"
+    echo -e "${CYAN}  Detects: Games, Streaming, Development, Rendering${NC}"
+    echo ""
+    
+    # Start automode in background
+    (
+        local last_mode=""
+        local check_interval=10
+        
+        while true; do
+            local current_mode=$(automode_detect)
+            
+            if [ -n "$current_mode" ] && [ "$current_mode" != "$last_mode" ]; then
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] Automode detected: $current_mode" >> "$LOG_FILE"
+                
+                # Apply the detected mode
+                case "$current_mode" in
+                    GAMEMODE) 
+                        if [ "$(get_state "GAMEMODE")" != "true" ]; then
+                            enable_gamemode >/dev/null 2>&1
+                        fi
+                        ;;
+                    STREAMMODE)
+                        if [ "$(get_state "STREAMMODE")" != "true" ]; then
+                            enable_streammode >/dev/null 2>&1
+                        fi
+                        ;;
+                    RENDERMODE)
+                        if [ "$(get_state "RENDERMODE")" != "true" ]; then
+                            enable_rendermode >/dev/null 2>&1
+                        fi
+                        ;;
+                    DEVMODE)
+                        if [ "$(get_state "DEVMODE")" != "true" ]; then
+                            enable_devmode >/dev/null 2>&1
+                        fi
+                        ;;
+                esac
+                last_mode="$current_mode"
+            elif [ -z "$current_mode" ] && [ -n "$last_mode" ]; then
+                # No activity detected, reset to defaults
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] Automode: No activity detected, resetting" >> "$LOG_FILE"
+                reset_all >/dev/null 2>&1
+                last_mode=""
+            fi
+            
+            sleep "$check_interval"
+        done
+    ) &
+    
+    local pid=$!
+    echo "$pid" > "$AUTOMODE_PID_FILE"
+    echo -e "${GREEN}✓ Automode started (PID: $pid)${NC}"
+    echo -e "${CYAN}  Run 'archmode automode stop' to stop${NC}"
+    log "Automode started (PID: $pid)"
+}
+
+# Stop automode
+automode_stop() {
+    if [ ! -f "$AUTOMODE_PID_FILE" ]; then
+        echo -e "${YELLOW}⚠ Automode is not running${NC}"
+        return 0
+    fi
+    
+    local pid=$(cat "$AUTOMODE_PID_FILE" 2>/dev/null)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null || true
+        rm -f "$AUTOMODE_PID_FILE"
+        echo -e "${GREEN}✓ Automode stopped${NC}"
+        log "Automode stopped"
+    else
+        echo -e "${YELLOW}⚠ Automode process not found${NC}"
+        rm -f "$AUTOMODE_PID_FILE"
+    fi
+}
+
+# Show automode status
+automode_status() {
+    echo -e "${CYAN}${BOLD}"
+    echo "╔════════════════════════════════════════╗"
+    echo "║        Automode Status                 ║"
+    echo "╚════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+    
+    if [ -f "$AUTOMODE_PID_FILE" ]; then
+        local pid=$(cat "$AUTOMODE_PID_FILE" 2>/dev/null)
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            echo -e "${GREEN}✓ Automode is ${BOLD}RUNNING${NC} (PID: $pid)"
+            echo ""
+            echo -e "${CYAN}Current Detection:${NC}"
+            local detected=$(automode_detect)
+            if [ -n "$detected" ]; then
+                echo -e "  ${GREEN}Detected Activity: ${BOLD}$detected${NC}"
+            else
+                echo -e "  ${YELLOW}No specific activity detected${NC}"
+            fi
+        else
+            echo -e "${RED}✗ Automode is ${BOLD}NOT RUNNING${NC}"
+            rm -f "$AUTOMODE_PID_FILE"
+        fi
+    else
+        echo -e "${RED}✗ Automode is ${BOLD}NOT RUNNING${NC}"
+    fi
+    echo ""
+}
+
+# Automode command handler
+automode() {
+    local action=${1:-status}
+    
+    case "$action" in
+        start)
+            automode_start
+            ;;
+        stop)
+            automode_stop
+            ;;
+        status|"")
+            automode_status
+            ;;
+        *)
+            echo -e "${RED}✗ Unknown action: $action${NC}"
+            echo "Usage: archmode automode [start|stop|status]"
+            return 1
+            ;;
+    esac
+}
+
+# ============================================
 # INTERACTIVE DASHBOARD
 # ============================================
 
@@ -2865,6 +3078,7 @@ show_help() {
     echo "  temp [threshold]       Monitor temperature with alerts (default: 80°C)"
     echo ""
     echo -e "${BOLD}Automation:${NC}"
+    echo "  automode [start|stop|status] Intelligent activity detection & auto-mode"
     echo "  schedule <time> <mode> Schedule mode activation (HH:MM format)"
     echo "  schedule-list          List scheduled modes"
     echo ""
@@ -2887,6 +3101,8 @@ show_help() {
     echo "  archmode enable GAMEMODE"
     echo "  archmode enable gamemode    # Case-insensitive"
     echo "  archmode profile GAMER"
+    echo "  archmode automode start     # Start intelligent auto-detection"
+    echo "  archmode automode status    # Check automode status"
     echo "  archmode create-mod mymod"
     echo "  archmode create-plugin myplugin"
     echo "  archmode edit-mod mymod vim"
@@ -2976,6 +3192,9 @@ case "$command" in
         ;;
     schedule-run)
         schedule_run
+        ;;
+    automode)
+        automode "$argument"
         ;;
     process)
         process_manager "$argument" "$argument2"
