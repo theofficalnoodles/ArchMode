@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ArchMode - System Mode Manager for Arch Linux
-# Version: 3.0.0 - ULTIMATE EDITION
+# Version: 4.0.0 - ULTIMATE EDITION
 # THE BEST SYSTEM MANAGEMENT TOOL - Complete System Control
 # With Mods, Plugins, Security, Privacy, Monitoring, Automation & More!
 #
@@ -49,7 +49,7 @@ HEALTH_FILE="$LOG_DIR/health_report.txt"
 TEMP_ALERT_FILE="$CONFIG_DIR/temp_alerts.conf"
 AUTOMODE_FILE="$CONFIG_DIR/automode.conf"
 AUTOMODE_PID_FILE="$LOG_DIR/automode.pid"
-VERSION="3.0.0"
+VERSION="4.0.0"
 
 # Performance: Cache state in memory
 declare -A STATE_CACHE
@@ -2415,12 +2415,14 @@ schedule_mode() {
         return 1
     fi
     
-    # Validate time format (HH:MM)
+    # Validate time format (HH:MM) - case insensitive
+    time=$(echo "$time" | tr '[:upper:]' '[:lower:]')
     if ! [[ "$time" =~ ^([0-1][0-9]|2[0-3]):[0-5][0-9]$ ]]; then
         echo -e "${RED}✗ Invalid time format. Use HH:MM (24-hour)${NC}"
         return 1
     fi
     
+    # Convert mode to uppercase for case-insensitive matching
     mode=$(echo "$mode" | tr '[:lower:]' '[:upper:]')
     
     # Add to schedule
@@ -2461,6 +2463,8 @@ schedule_run() {
     
     while IFS=: read -r time mode; do
         [[ -z "$time" ]] && continue
+        # Convert mode to uppercase for case-insensitive matching
+        mode=$(echo "$mode" | tr '[:lower:]' '[:upper:]')
         if [ "$time" = "$current_time" ]; then
             log "Running scheduled mode: $mode"
             case "$mode" in
@@ -2484,7 +2488,7 @@ schedule_run() {
 # ============================================
 
 process_manager() {
-    local action=$1
+    local action=$(echo "${1:-list}" | tr '[:upper:]' '[:lower:]')
     local target=$2
     
     case "$action" in
@@ -2538,7 +2542,7 @@ process_manager() {
 # ============================================
 
 system_cleanup() {
-    local type=${1:-all}
+    local type=$(echo "${1:-all}" | tr '[:upper:]' '[:lower:]')
     local freed_space=0
     
     echo -e "${CYAN}${BOLD}"
@@ -2677,7 +2681,7 @@ network_analyzer() {
 # ============================================
 
 gpu_manager() {
-    local action=${1:-info}
+    local action=$(echo "${1:-info}" | tr '[:upper:]' '[:lower:]')
     
     case "$action" in
         info)
@@ -2951,7 +2955,7 @@ automode_status() {
 
 # Automode command handler
 automode() {
-    local action=${1:-status}
+    local action=$(echo "${1:-status}" | tr '[:upper:]' '[:lower:]')
     
     case "$action" in
         start)
@@ -3116,7 +3120,8 @@ show_help() {
 # Argument parsing
 # ============================================
 
-command="${1:-dashboard}"
+# Convert command to lowercase for case-insensitive matching
+command=$(echo "${1:-dashboard}" | tr '[:upper:]' '[:lower:]')
 argument="${2:-}"
 argument2="${3:-}"
 
