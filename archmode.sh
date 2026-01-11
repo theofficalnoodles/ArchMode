@@ -85,14 +85,60 @@ NIGHT_OWL:NIGHTMODE,QUIETMODE:Late night computing
 EOF
 fi
 
-# Load mods and plugins
-load_mods
-load_plugins
-
 # Logging function with performance optimization
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG_FILE"
 }
+
+# ============================================
+# MODS AND PLUGINS SYSTEM (Early Loading)
+# ============================================
+
+# Load all mods
+load_mods() {
+    if [ ! -d "$MODS_DIR" ]; then
+        mkdir -p "$MODS_DIR"
+        return 0
+    fi
+    
+    # Use nullglob to handle empty directories
+    shopt -s nullglob 2>/dev/null || true
+    for mod_file in "$MODS_DIR"/*.sh; do
+        [ -f "$mod_file" ] || continue
+        [ -x "$mod_file" ] || chmod +x "$mod_file"
+        
+        # Source the mod (safely)
+        if [ -r "$mod_file" ]; then
+            source "$mod_file" 2>/dev/null && log "Loaded mod: $(basename "$mod_file")" || log "Failed to load mod: $(basename "$mod_file")"
+        fi
+    done
+    shopt -u nullglob 2>/dev/null || true
+}
+
+# Load all plugins
+load_plugins() {
+    if [ ! -d "$PLUGINS_DIR" ]; then
+        mkdir -p "$PLUGINS_DIR"
+        return 0
+    fi
+    
+    # Use nullglob to handle empty directories
+    shopt -s nullglob 2>/dev/null || true
+    for plugin_file in "$PLUGINS_DIR"/*.sh; do
+        [ -f "$plugin_file" ] || continue
+        [ -x "$plugin_file" ] || chmod +x "$plugin_file"
+        
+        # Source the plugin (safely)
+        if [ -r "$plugin_file" ]; then
+            source "$plugin_file" 2>/dev/null && log "Loaded plugin: $(basename "$plugin_file")" || log "Failed to load plugin: $(basename "$plugin_file")"
+        fi
+    done
+    shopt -u nullglob 2>/dev/null || true
+}
+
+# Load mods and plugins (called after function definitions)
+load_mods
+load_plugins
 
 # Load state cache for performance
 load_state_cache() {
@@ -523,44 +569,8 @@ optimize_cpu_boost() {
 }
 
 # ============================================
-# MODS AND PLUGINS SYSTEM
+# MODS AND PLUGINS SYSTEM (Management Functions)
 # ============================================
-
-# Load all mods
-load_mods() {
-    if [ ! -d "$MODS_DIR" ]; then
-        mkdir -p "$MODS_DIR"
-        return 0
-    fi
-    
-    for mod_file in "$MODS_DIR"/*.sh; do
-        [ -f "$mod_file" ] || continue
-        [ -x "$mod_file" ] || chmod +x "$mod_file"
-        
-        # Source the mod (safely)
-        if [ -r "$mod_file" ]; then
-            source "$mod_file" 2>/dev/null && log "Loaded mod: $(basename "$mod_file")" || log "Failed to load mod: $(basename "$mod_file")"
-        fi
-    done
-}
-
-# Load all plugins
-load_plugins() {
-    if [ ! -d "$PLUGINS_DIR" ]; then
-        mkdir -p "$PLUGINS_DIR"
-        return 0
-    fi
-    
-    for plugin_file in "$PLUGINS_DIR"/*.sh; do
-        [ -f "$plugin_file" ] || continue
-        [ -x "$plugin_file" ] || chmod +x "$plugin_file"
-        
-        # Source the plugin (safely)
-        if [ -r "$plugin_file" ]; then
-            source "$plugin_file" 2>/dev/null && log "Loaded plugin: $(basename "$plugin_file")" || log "Failed to load plugin: $(basename "$plugin_file")"
-        fi
-    done
-}
 
 # List installed mods
 list_mods() {
@@ -571,14 +581,26 @@ list_mods() {
     echo -e "${NC}"
     echo ""
     
-    if [ ! -d "$MODS_DIR" ] || [ -z "$(ls -A "$MODS_DIR"/*.sh 2>/dev/null)" ]; then
+    if [ ! -d "$MODS_DIR" ]; then
         echo -e "${YELLOW}No mods installed${NC}"
         echo -e "${CYAN}Create one with: archmode create-mod <name>${NC}"
         echo ""
         return 0
     fi
     
-    for mod_file in "$MODS_DIR"/*.sh; do
+    # Use nullglob to handle empty directories
+    shopt -s nullglob 2>/dev/null || true
+    local mod_files=("$MODS_DIR"/*.sh)
+    shopt -u nullglob 2>/dev/null || true
+    
+    if [ ${#mod_files[@]} -eq 0 ]; then
+        echo -e "${YELLOW}No mods installed${NC}"
+        echo -e "${CYAN}Create one with: archmode create-mod <name>${NC}"
+        echo ""
+        return 0
+    fi
+    
+    for mod_file in "${mod_files[@]}"; do
         [ -f "$mod_file" ] || continue
         local mod_name=$(basename "$mod_file" .sh)
         echo -e "${GREEN}✓${NC} ${BOLD}$mod_name${NC}"
@@ -596,14 +618,26 @@ list_plugins() {
     echo -e "${NC}"
     echo ""
     
-    if [ ! -d "$PLUGINS_DIR" ] || [ -z "$(ls -A "$PLUGINS_DIR"/*.sh 2>/dev/null)" ]; then
+    if [ ! -d "$PLUGINS_DIR" ]; then
         echo -e "${YELLOW}No plugins installed${NC}"
         echo -e "${CYAN}Create one with: archmode create-plugin <name>${NC}"
         echo ""
         return 0
     fi
     
-    for plugin_file in "$PLUGINS_DIR"/*.sh; do
+    # Use nullglob to handle empty directories
+    shopt -s nullglob 2>/dev/null || true
+    local plugin_files=("$PLUGINS_DIR"/*.sh)
+    shopt -u nullglob 2>/dev/null || true
+    
+    if [ ${#plugin_files[@]} -eq 0 ]; then
+        echo -e "${YELLOW}No plugins installed${NC}"
+        echo -e "${CYAN}Create one with: archmode create-plugin <name>${NC}"
+        echo ""
+        return 0
+    fi
+    
+    for plugin_file in "${plugin_files[@]}"; do
         [ -f "$plugin_file" ] || continue
         local plugin_name=$(basename "$plugin_file" .sh)
         echo -e "${GREEN}✓${NC} ${BOLD}$plugin_name${NC}"
