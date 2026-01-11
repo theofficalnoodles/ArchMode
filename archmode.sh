@@ -1,9 +1,23 @@
 #!/bin/bash
 
 # ArchMode - System Mode Manager for Arch Linux
-# Version: 1.0.0 - ULTIMATE EDITION
-# Ultimate Performance Tool - Advanced system optimizations
-# With Mods, Plugins, Security & Privacy Features
+# Version: 2.0.0 - ULTIMATE EDITION
+# THE BEST SYSTEM MANAGEMENT TOOL - Complete System Control
+# With Mods, Plugins, Security, Privacy, Monitoring, Automation & More!
+#
+# Features:
+# - System Mode Management (Gaming, Productivity, Power Save, etc.)
+# - Real-Time Monitoring Dashboard
+# - System Health Checks
+# - Process Management
+# - Network Analysis
+# - GPU Management
+# - System Cleanup & Optimization
+# - Automation & Scheduling
+# - Temperature Monitoring
+# - Mods & Plugins System
+# - Security & Privacy Controls
+# - Interactive Dashboard
 
 set -euo pipefail
 
@@ -29,7 +43,11 @@ MODS_DIR="$CONFIG_DIR/mods"
 PLUGINS_DIR="$CONFIG_DIR/plugins"
 SECURITY_FILE="$CONFIG_DIR/security.conf"
 PRIVACY_FILE="$CONFIG_DIR/privacy.conf"
-VERSION="1.0.0"
+SCHEDULE_FILE="$CONFIG_DIR/schedule.conf"
+MONITOR_FILE="$CONFIG_DIR/monitor.conf"
+HEALTH_FILE="$LOG_DIR/health_report.txt"
+TEMP_ALERT_FILE="$CONFIG_DIR/temp_alerts.conf"
+VERSION="2.0.0"
 
 # Performance: Cache state in memory
 declare -A STATE_CACHE
@@ -45,6 +63,11 @@ SUDO_CHECKED=false
 
 # Create directories
 mkdir -p "$CONFIG_DIR" "$LOG_DIR" "$BACKUP_DIR" "$MODS_DIR" "$PLUGINS_DIR"
+
+# Initialize additional config files
+[ ! -f "$SCHEDULE_FILE" ] && touch "$SCHEDULE_FILE"
+[ ! -f "$MONITOR_FILE" ] && touch "$MONITOR_FILE"
+[ ! -f "$TEMP_ALERT_FILE" ] && touch "$TEMP_ALERT_FILE"
 
 # Initialize state file
 [ ! -f "$STATE_FILE" ] && touch "$STATE_FILE"
@@ -2129,6 +2152,678 @@ uninstall_archmode() {
     echo ""
 }
 
+# ============================================
+# SYSTEM HEALTH CHECK - Comprehensive Diagnostics
+# ============================================
+
+system_health_check() {
+    echo -e "${CYAN}${BOLD}"
+    echo "╔════════════════════════════════════════╗"
+    echo "║      System Health Check               ║"
+    echo "╚════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+    
+    local health_score=100
+    local issues=()
+    local warnings=()
+    
+    # Check disk space
+    echo -e "${BOLD}1. Disk Space Check${NC}"
+    local disk_usage=$(df -h / | awk 'NR==2 {print $5}' | sed 's/%//')
+    if [ "$disk_usage" -gt 90 ]; then
+        echo -e "  ${RED}✗ Critical: Disk usage at ${disk_usage}%${NC}"
+        issues+=("Disk usage critical: ${disk_usage}%")
+        health_score=$((health_score - 20))
+    elif [ "$disk_usage" -gt 80 ]; then
+        echo -e "  ${YELLOW}⚠ Warning: Disk usage at ${disk_usage}%${NC}"
+        warnings+=("Disk usage high: ${disk_usage}%")
+        health_score=$((health_score - 10))
+    else
+        echo -e "  ${GREEN}✓ Disk usage: ${disk_usage}%${NC}"
+    fi
+    
+    # Check memory
+    echo -e "${BOLD}2. Memory Check${NC}"
+    local mem_usage=$(free | awk '/^Mem:/ {printf "%.0f", $3/$2 * 100}')
+    if [ "$mem_usage" -gt 90 ]; then
+        echo -e "  ${RED}✗ Critical: Memory usage at ${mem_usage}%${NC}"
+        issues+=("Memory usage critical: ${mem_usage}%")
+        health_score=$((health_score - 15))
+    elif [ "$mem_usage" -gt 80 ]; then
+        echo -e "  ${YELLOW}⚠ Warning: Memory usage at ${mem_usage}%${NC}"
+        warnings+=("Memory usage high: ${mem_usage}%")
+        health_score=$((health_score - 5))
+    else
+        echo -e "  ${GREEN}✓ Memory usage: ${mem_usage}%${NC}"
+    fi
+    
+    # Check CPU temperature
+    echo -e "${BOLD}3. Temperature Check${NC}"
+    if has_capability "sensors"; then
+        local temp=$(sensors 2>/dev/null | grep -iE 'Package id 0|Tdie|Tctl' | awk '{print $2}' | sed 's/+//;s/°C//;s/°F//' | head -1)
+        if [ -n "$temp" ]; then
+            local temp_num=$(echo "$temp" | grep -oE '[0-9]+' | head -1)
+            if [ -n "$temp_num" ] && [ "$temp_num" -gt 85 ]; then
+                echo -e "  ${RED}✗ Critical: CPU temperature ${temp}${NC}"
+                issues+=("CPU temperature critical: ${temp}")
+                health_score=$((health_score - 15))
+            elif [ -n "$temp_num" ] && [ "$temp_num" -gt 75 ]; then
+                echo -e "  ${YELLOW}⚠ Warning: CPU temperature ${temp}${NC}"
+                warnings+=("CPU temperature high: ${temp}")
+                health_score=$((health_score - 5))
+            else
+                echo -e "  ${GREEN}✓ CPU temperature: ${temp}${NC}"
+            fi
+        else
+            echo -e "  ${YELLOW}⚠ Temperature sensors not available${NC}"
+        fi
+    else
+        echo -e "  ${YELLOW}⚠ Install 'lm_sensors' for temperature monitoring${NC}"
+    fi
+    
+    # Check system load
+    echo -e "${BOLD}4. System Load Check${NC}"
+    local load_avg=$(uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | sed 's/,//')
+    local cpu_cores=$(nproc)
+    local load_threshold=$(echo "$cpu_cores * 1.5" | bc 2>/dev/null || echo "4")
+    if (( $(echo "$load_avg > $load_threshold" | bc -l 2>/dev/null || echo "0") )); then
+        echo -e "  ${YELLOW}⚠ Warning: High system load: ${load_avg}${NC}"
+        warnings+=("High system load: ${load_avg}")
+        health_score=$((health_score - 5))
+    else
+        echo -e "  ${GREEN}✓ System load: ${load_avg}${NC}"
+    fi
+    
+    # Check for updates
+    echo -e "${BOLD}5. System Updates Check${NC}"
+    if command -v checkupdates &>/dev/null; then
+        local updates=$(checkupdates 2>/dev/null | wc -l)
+        if [ "$updates" -gt 50 ]; then
+            echo -e "  ${YELLOW}⚠ ${updates} packages need updates${NC}"
+            warnings+=("Many packages need updates: ${updates}")
+        else
+            echo -e "  ${GREEN}✓ Updates: ${updates} packages${NC}"
+        fi
+    else
+        echo -e "  ${CYAN}ℹ Install 'pacman-contrib' for update checking${NC}"
+    fi
+    
+    # Check disk health (if smartctl available)
+    echo -e "${BOLD}6. Disk Health Check${NC}"
+    if command -v smartctl &>/dev/null && check_sudo; then
+        local disk=$(lsblk -ndo NAME | head -1)
+        if [ -n "$disk" ]; then
+            local smart_status=$(sudo smartctl -H "/dev/$disk" 2>/dev/null | grep -i "SMART overall-health" | awk -F: '{print $2}' | xargs)
+            if [ "$smart_status" = "PASSED" ]; then
+                echo -e "  ${GREEN}✓ Disk health: PASSED${NC}"
+            else
+                echo -e "  ${YELLOW}⚠ Disk health: ${smart_status}${NC}"
+                warnings+=("Disk health: ${smart_status}")
+            fi
+        fi
+    else
+        echo -e "  ${CYAN}ℹ Install 'smartmontools' for disk health monitoring${NC}"
+    fi
+    
+    # Check network connectivity
+    echo -e "${BOLD}7. Network Connectivity${NC}"
+    if ping -c 1 -W 2 8.8.8.8 &>/dev/null; then
+        echo -e "  ${GREEN}✓ Network: Connected${NC}"
+    else
+        echo -e "  ${RED}✗ Network: No internet connection${NC}"
+        issues+=("No internet connection")
+        health_score=$((health_score - 10))
+    fi
+    
+    # Summary
+    echo ""
+    echo -e "${CYAN}${BOLD}Health Score: ${NC}"
+    if [ "$health_score" -ge 90 ]; then
+        echo -e "${GREEN}${BOLD}  $health_score/100 - EXCELLENT${NC}"
+    elif [ "$health_score" -ge 70 ]; then
+        echo -e "${YELLOW}${BOLD}  $health_score/100 - GOOD${NC}"
+    elif [ "$health_score" -ge 50 ]; then
+        echo -e "${YELLOW}${BOLD}  $health_score/100 - FAIR${NC}"
+    else
+        echo -e "${RED}${BOLD}  $health_score/100 - POOR${NC}"
+    fi
+    
+    if [ ${#issues[@]} -gt 0 ]; then
+        echo ""
+        echo -e "${RED}${BOLD}Critical Issues:${NC}"
+        for issue in "${issues[@]}"; do
+            echo -e "  ${RED}• $issue${NC}"
+        done
+    fi
+    
+    if [ ${#warnings[@]} -gt 0 ]; then
+        echo ""
+        echo -e "${YELLOW}${BOLD}Warnings:${NC}"
+        for warning in "${warnings[@]}"; do
+            echo -e "  ${YELLOW}• $warning${NC}"
+        done
+    fi
+    
+    # Save report
+    {
+        echo "System Health Report - $(date)"
+        echo "Health Score: $health_score/100"
+        echo ""
+        echo "Issues:"
+        printf '%s\n' "${issues[@]}"
+        echo ""
+        echo "Warnings:"
+        printf '%s\n' "${warnings[@]}"
+    } > "$HEALTH_FILE"
+    
+    echo ""
+    echo -e "${CYAN}Report saved to: $HEALTH_FILE${NC}"
+    log "System health check completed - Score: $health_score/100"
+}
+
+# ============================================
+# REAL-TIME MONITORING DASHBOARD
+# ============================================
+
+monitor_dashboard() {
+    local refresh_rate=${1:-2}
+    
+    echo -e "${CYAN}${BOLD}"
+    echo "╔════════════════════════════════════════╗"
+    echo "║    Real-Time System Monitor            ║"
+    echo "╚════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo -e "${YELLOW}Press Ctrl+C to exit${NC}"
+    echo ""
+    
+    while true; do
+        clear
+        echo -e "${CYAN}${BOLD}"
+        echo "╔════════════════════════════════════════╗"
+        echo "║    Real-Time System Monitor            ║"
+        echo "╚════════════════════════════════════════╝"
+        echo -e "${NC}"
+        echo ""
+        
+        # CPU Usage
+        local cpu_idle cpu_total
+        read -r cpu_idle cpu_total < <(awk '/^cpu / {idle=$5+$6; total=idle+$2+$3+$4; print idle, total}' /proc/stat)
+        sleep 0.1
+        local cpu_idle2 cpu_total2
+        read -r cpu_idle2 cpu_total2 < <(awk '/^cpu / {idle=$5+$6; total=idle+$2+$3+$4; print idle, total}' /proc/stat)
+        local cpu_usage=$(awk "BEGIN {printf \"%.1f\", (1-($cpu_idle2-$cpu_idle)/($cpu_total2-$cpu_total))*100}")
+        
+        # Memory
+        local mem_info=$(awk '/^MemTotal:/{total=$2} /^MemAvailable:/{avail=$2} END {used=total-avail; printf "%.1fG / %.1fG (%.1f%%)", used/1024/1024, total/1024/1024, (used/total)*100}' /proc/meminfo 2>/dev/null)
+        
+        # Temperature
+        local temp="N/A"
+        if has_capability "sensors"; then
+            temp=$(sensors 2>/dev/null | grep -iE 'Package id 0|Tdie|Tctl' | awk '{print $2$3}' | head -n1 | sed 's/+//' || echo "N/A")
+        fi
+        
+        # Disk I/O
+        local disk_io=$(iostat -x 1 2 2>/dev/null | tail -1 | awk '{print $10}' || echo "N/A")
+        
+        # Network
+        local net_rx=$(cat /sys/class/net/*/statistics/rx_bytes 2>/dev/null | awk '{sum+=$1} END {printf "%.2f MB", sum/1024/1024}' || echo "N/A")
+        local net_tx=$(cat /sys/class/net/*/statistics/tx_bytes 2>/dev/null | awk '{sum+=$1} END {printf "%.2f MB", sum/1024/1024}' || echo "N/A")
+        
+        # Display
+        echo -e "${BOLD}CPU Usage:${NC} ${cpu_usage}%"
+        echo -e "${BOLD}Memory:${NC} $mem_info"
+        echo -e "${BOLD}Temperature:${NC} $temp"
+        echo -e "${BOLD}Disk I/O:${NC} $disk_io"
+        echo -e "${BOLD}Network RX:${NC} $net_rx"
+        echo -e "${BOLD}Network TX:${NC} $net_tx"
+        echo ""
+        echo -e "${CYAN}Refreshing every ${refresh_rate}s...${NC}"
+        
+        sleep "$refresh_rate"
+    done
+}
+
+# ============================================
+# AUTOMATION & SCHEDULING
+# ============================================
+
+schedule_mode() {
+    local time=$1
+    local mode=$2
+    
+    if [ -z "$time" ] || [ -z "$mode" ]; then
+        echo -e "${RED}✗ Time and mode required${NC}"
+        echo "Usage: archmode schedule <time> <mode>"
+        echo "Example: archmode schedule 22:00 NIGHTMODE"
+        return 1
+    fi
+    
+    # Validate time format (HH:MM)
+    if ! [[ "$time" =~ ^([0-1][0-9]|2[0-3]):[0-5][0-9]$ ]]; then
+        echo -e "${RED}✗ Invalid time format. Use HH:MM (24-hour)${NC}"
+        return 1
+    fi
+    
+    mode=$(echo "$mode" | tr '[:lower:]' '[:upper:]')
+    
+    # Add to schedule
+    echo "$time:$mode" >> "$SCHEDULE_FILE"
+    echo -e "${GREEN}✓ Scheduled: $mode at $time${NC}"
+    log "Scheduled $mode at $time"
+    
+    # Create cron job if not exists
+    if ! crontab -l 2>/dev/null | grep -q "archmode schedule-run"; then
+        (crontab -l 2>/dev/null; echo "* * * * * /usr/local/bin/archmode schedule-run") | crontab -
+        echo -e "${CYAN}✓ Cron job created${NC}"
+    fi
+}
+
+list_schedule() {
+    echo -e "${CYAN}${BOLD}"
+    echo "╔════════════════════════════════════════╗"
+    echo "║        Scheduled Modes                 ║"
+    echo "╚════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+    
+    if [ ! -s "$SCHEDULE_FILE" ]; then
+        echo -e "${YELLOW}No scheduled modes${NC}"
+        echo -e "${CYAN}Schedule one with: archmode schedule <time> <mode>${NC}"
+        return 0
+    fi
+    
+    while IFS=: read -r time mode; do
+        [[ -z "$time" ]] && continue
+        echo -e "${GREEN}✓${NC} ${BOLD}$mode${NC} at ${CYAN}$time${NC}"
+    done < "$SCHEDULE_FILE"
+    echo ""
+}
+
+schedule_run() {
+    local current_time=$(date +%H:%M)
+    
+    while IFS=: read -r time mode; do
+        [[ -z "$time" ]] && continue
+        if [ "$time" = "$current_time" ]; then
+            log "Running scheduled mode: $mode"
+            case "$mode" in
+                GAMEMODE) enable_gamemode ;;
+                STREAMMODE) enable_streammode ;;
+                PRODUCTIVITY) enable_productivity ;;
+                POWERMODE) enable_powermode ;;
+                QUIETMODE) enable_quietmode ;;
+                DEVMODE) enable_devmode ;;
+                NIGHTMODE) enable_nightmode ;;
+                TRAVELMODE) enable_travelmode ;;
+                RENDERMODE) enable_rendermode ;;
+                ULTIMATE) enable_ultimatemode ;;
+            esac
+        fi
+    done < "$SCHEDULE_FILE"
+}
+
+# ============================================
+# PROCESS MANAGER
+# ============================================
+
+process_manager() {
+    local action=$1
+    local target=$2
+    
+    case "$action" in
+        list|"")
+            echo -e "${CYAN}${BOLD}"
+            echo "╔════════════════════════════════════════╗"
+            echo "║        Top Processes                   ║"
+            echo "╚════════════════════════════════════════╝"
+            echo -e "${NC}"
+            echo ""
+            ps aux --sort=-%cpu | head -11 | awk 'NR==1 {printf "%-8s %-8s %-6s %-6s %s\n", $1, $2, $3, $4, $11} NR>1 {printf "%-8s %-8s %-6s %-6s %s\n", $1, $2, $3"%", $4"%", substr($0, index($0,$11))}'
+            echo ""
+            ;;
+        kill)
+            if [ -z "$target" ]; then
+                echo -e "${RED}✗ Process name or PID required${NC}"
+                return 1
+            fi
+            if [[ "$target" =~ ^[0-9]+$ ]]; then
+                kill "$target" 2>/dev/null && echo -e "${GREEN}✓ Process $target killed${NC}" || echo -e "${RED}✗ Failed to kill process${NC}"
+            else
+                pkill "$target" && echo -e "${GREEN}✓ Process $target killed${NC}" || echo -e "${RED}✗ Failed to kill process${NC}"
+            fi
+            ;;
+        priority)
+            if [ -z "$target" ]; then
+                echo -e "${RED}✗ Process name or PID required${NC}"
+                return 1
+            fi
+            local pid=$target
+            if ! [[ "$pid" =~ ^[0-9]+$ ]]; then
+                pid=$(pgrep -x "$target" | head -1)
+            fi
+            if [ -n "$pid" ]; then
+                set_process_priority "$pid" -10 "SCHED_OTHER"
+                echo -e "${GREEN}✓ Process $pid prioritized${NC}"
+            else
+                echo -e "${RED}✗ Process not found${NC}"
+            fi
+            ;;
+        *)
+            echo -e "${RED}✗ Unknown action: $action${NC}"
+            echo "Usage: archmode process [list|kill|priority] [target]"
+            return 1
+            ;;
+    esac
+}
+
+# ============================================
+# SYSTEM CLEANUP
+# ============================================
+
+system_cleanup() {
+    local type=${1:-all}
+    local freed_space=0
+    
+    echo -e "${CYAN}${BOLD}"
+    echo "╔════════════════════════════════════════╗"
+    echo "║        System Cleanup                   ║"
+    echo "╚════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+    
+    case "$type" in
+        cache|all)
+            echo -e "${CYAN}➜ Cleaning package cache...${NC}"
+            if check_sudo; then
+                local cache_size=$(du -sh /var/cache/pacman/pkg 2>/dev/null | awk '{print $1}' || echo "0")
+                sudo pacman -Sc --noconfirm 2>/dev/null && echo -e "${GREEN}✓ Package cache cleaned (${cache_size})${NC}" || echo -e "${YELLOW}⚠ Cache cleanup skipped${NC}"
+            fi
+            ;;
+        temp|all)
+            echo -e "${CYAN}➜ Cleaning temporary files...${NC}"
+            local temp_size=$(du -sh /tmp 2>/dev/null | awk '{print $1}' || echo "0")
+            find /tmp -type f -atime +7 -delete 2>/dev/null && echo -e "${GREEN}✓ Temp files cleaned${NC}" || true
+            ;;
+        logs|all)
+            echo -e "${CYAN}➜ Cleaning old logs...${NC}"
+            if check_sudo; then
+                find /var/log -type f -name "*.log" -mtime +30 -delete 2>/dev/null && echo -e "${GREEN}✓ Old logs cleaned${NC}" || true
+            fi
+            ;;
+        home|all)
+            echo -e "${CYAN}➜ Cleaning home directory...${NC}"
+            # Clean common cache directories
+            for dir in ~/.cache ~/.thumbnails ~/.local/share/Trash; do
+                if [ -d "$dir" ]; then
+                    local size=$(du -sh "$dir" 2>/dev/null | awk '{print $1}' || echo "0")
+                    find "$dir" -type f -atime +30 -delete 2>/dev/null && echo -e "${GREEN}✓ Cleaned $dir (${size})${NC}" || true
+                fi
+            done
+            ;;
+        *)
+            echo -e "${RED}✗ Unknown cleanup type: $type${NC}"
+            echo "Usage: archmode cleanup [cache|temp|logs|home|all]"
+            return 1
+            ;;
+    esac
+    
+    echo ""
+    echo -e "${GREEN}✓ Cleanup complete!${NC}"
+    log "System cleanup performed: $type"
+}
+
+# ============================================
+# TEMPERATURE MONITORING & ALERTS
+# ============================================
+
+temp_monitor() {
+    local threshold=${1:-80}
+    
+    if ! has_capability "sensors"; then
+        echo -e "${RED}✗ Install 'lm_sensors' for temperature monitoring${NC}"
+        return 1
+    fi
+    
+    echo -e "${CYAN}${BOLD}"
+    echo "╔════════════════════════════════════════╗"
+    echo "║    Temperature Monitor                 ║"
+    echo "╚════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo -e "${YELLOW}Monitoring temperature (threshold: ${threshold}°C)${NC}"
+    echo -e "${YELLOW}Press Ctrl+C to exit${NC}"
+    echo ""
+    
+    while true; do
+        local temp=$(sensors 2>/dev/null | grep -iE 'Package id 0|Tdie|Tctl' | awk '{print $2}' | sed 's/+//;s/°C//' | grep -oE '[0-9]+' | head -1)
+        if [ -n "$temp" ] && [ "$temp" -gt "$threshold" ]; then
+            echo -e "${RED}${BOLD}⚠ ALERT: Temperature ${temp}°C exceeds threshold ${threshold}°C!${NC}"
+            if command -v notify-send &>/dev/null; then
+                notify-send "Temperature Alert" "CPU temperature: ${temp}°C" -u critical
+            fi
+        else
+            echo -e "${GREEN}✓ Temperature: ${temp}°C${NC}"
+        fi
+        sleep 5
+    done
+}
+
+# ============================================
+# NETWORK ANALYZER
+# ============================================
+
+network_analyzer() {
+    echo -e "${CYAN}${BOLD}"
+    echo "╔════════════════════════════════════════╗"
+    echo "║        Network Analysis                ║"
+    echo "╚════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+    
+    # Network interfaces
+    echo -e "${BOLD}Network Interfaces:${NC}"
+    ip -br addr show | while read -r line; do
+        echo -e "  ${CYAN}$line${NC}"
+    done
+    echo ""
+    
+    # Connection speed test (if speedtest-cli available)
+    if command -v speedtest-cli &>/dev/null; then
+        echo -e "${BOLD}Internet Speed Test:${NC}"
+        echo -e "${CYAN}Running speed test...${NC}"
+        speedtest-cli --simple 2>/dev/null || echo -e "${YELLOW}Speed test failed${NC}"
+    else
+        echo -e "${YELLOW}Install 'speedtest-cli' for speed testing${NC}"
+    fi
+    echo ""
+    
+    # Active connections
+    echo -e "${BOLD}Active Connections:${NC}"
+    ss -tun | head -10
+    echo ""
+    
+    # Network statistics
+    echo -e "${BOLD}Network Statistics:${NC}"
+    for iface in /sys/class/net/*; do
+        local name=$(basename "$iface")
+        [ "$name" = "lo" ] && continue
+        local rx=$(cat "$iface/statistics/rx_bytes" 2>/dev/null || echo "0")
+        local tx=$(cat "$iface/statistics/tx_bytes" 2>/dev/null || echo "0")
+        local rx_mb=$(awk "BEGIN {printf \"%.2f\", $rx/1024/1024}")
+        local tx_mb=$(awk "BEGIN {printf \"%.2f\", $tx/1024/1024}")
+        echo -e "  ${CYAN}$name:${NC} RX: ${rx_mb} MB, TX: ${tx_mb} MB"
+    done
+    echo ""
+}
+
+# ============================================
+# GPU MANAGER
+# ============================================
+
+gpu_manager() {
+    local action=${1:-info}
+    
+    case "$action" in
+        info)
+            echo -e "${CYAN}${BOLD}"
+            echo "╔════════════════════════════════════════╗"
+            echo "║        GPU Information                 ║"
+            echo "╚════════════════════════════════════════╝"
+            echo -e "${NC}"
+            echo ""
+            
+            # NVIDIA
+            if command -v nvidia-smi &>/dev/null; then
+                echo -e "${BOLD}NVIDIA GPU:${NC}"
+                nvidia-smi --query-gpu=name,temperature.gpu,utilization.gpu,memory.used,memory.total --format=csv,noheader | while read -r line; do
+                    echo -e "  ${GREEN}$line${NC}"
+                done
+            fi
+            
+            # AMD
+            if command -v rocm-smi &>/dev/null; then
+                echo -e "${BOLD}AMD GPU:${NC}"
+                rocm-smi 2>/dev/null | head -20
+            fi
+            
+            # Generic
+            lspci | grep -i vga
+            echo ""
+            ;;
+        monitor)
+            if command -v nvidia-smi &>/dev/null; then
+                watch -n 1 nvidia-smi
+            else
+                echo -e "${YELLOW}NVIDIA GPU monitoring requires nvidia-smi${NC}"
+            fi
+            ;;
+        *)
+            echo -e "${RED}✗ Unknown action: $action${NC}"
+            echo "Usage: archmode gpu [info|monitor]"
+            return 1
+            ;;
+    esac
+}
+
+# ============================================
+# SYSTEM OPTIMIZER (One-Click Optimization)
+# ============================================
+
+system_optimizer() {
+    echo -e "${CYAN}${BOLD}"
+    echo "╔════════════════════════════════════════╗"
+    echo "║        System Optimizer                ║"
+    echo "╚════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+    echo -e "${CYAN}➜ Running comprehensive system optimization...${NC}"
+    echo ""
+    
+    # Clean package cache
+    echo -e "${CYAN}1. Cleaning package cache...${NC}"
+    if check_sudo; then
+        sudo pacman -Sc --noconfirm 2>/dev/null && echo -e "${GREEN}✓ Cache cleaned${NC}" || echo -e "${YELLOW}⚠ Cache cleanup skipped${NC}"
+    fi
+    
+    # Optimize database
+    echo -e "${CYAN}2. Optimizing package database...${NC}"
+    if check_sudo; then
+        sudo pacman-optimize --noconfirm 2>/dev/null && echo -e "${GREEN}✓ Database optimized${NC}" || echo -e "${YELLOW}⚠ Database optimization skipped${NC}"
+    fi
+    
+    # Update file database
+    echo -e "${CYAN}3. Updating file database...${NC}"
+    if check_sudo; then
+        sudo updatedb 2>/dev/null && echo -e "${GREEN}✓ File database updated${NC}" || echo -e "${YELLOW}⚠ File database update skipped${NC}"
+    fi
+    
+    # Clear systemd journal
+    echo -e "${CYAN}4. Cleaning systemd journal...${NC}"
+    if check_sudo; then
+        sudo journalctl --vacuum-time=7d 2>/dev/null && echo -e "${GREEN}✓ Journal cleaned${NC}" || echo -e "${YELLOW}⚠ Journal cleanup skipped${NC}"
+    fi
+    
+    # Optimize filesystems
+    echo -e "${CYAN}5. Optimizing filesystems...${NC}"
+    if check_sudo; then
+        for fs in / /home; do
+            if mountpoint -q "$fs" 2>/dev/null; then
+                sudo fstrim "$fs" 2>/dev/null && echo -e "${GREEN}✓ Trimmed $fs${NC}" || true
+            fi
+        done
+    fi
+    
+    echo ""
+    echo -e "${GREEN}✓${NC} ${BOLD}System optimization complete!${NC}"
+    log "System optimizer completed"
+}
+
+# ============================================
+# INTERACTIVE DASHBOARD
+# ============================================
+
+interactive_dashboard() {
+    while true; do
+        clear
+        echo -e "${CYAN}${BOLD}"
+        echo "╔════════════════════════════════════════╗"
+        echo "║     ArchMode Interactive Dashboard     ║"
+        echo "╚════════════════════════════════════════╝"
+        echo -e "${NC}"
+        echo ""
+        echo -e "${BOLD}1.${NC} System Status"
+        echo -e "${BOLD}2.${NC} Enable Mode"
+        echo -e "${BOLD}3.${NC} System Health Check"
+        echo -e "${BOLD}4.${NC} Real-Time Monitor"
+        echo -e "${BOLD}5.${NC} Process Manager"
+        echo -e "${BOLD}6.${NC} System Cleanup"
+        echo -e "${BOLD}7.${NC} Network Analyzer"
+        echo -e "${BOLD}8.${NC} GPU Manager"
+        echo -e "${BOLD}9.${NC} System Optimizer"
+        echo -e "${BOLD}10.${NC} Schedule Mode"
+        echo -e "${BOLD}11.${NC} Mods & Plugins"
+        echo -e "${BOLD}12.${NC} Security & Privacy"
+        echo -e "${BOLD}0.${NC} Exit"
+        echo ""
+        read -p "Select option: " choice
+        
+        case "$choice" in
+            1) show_status; read -p "Press Enter to continue..."; ;;
+            2) 
+                list_modes
+                read -p "Enter mode name: " mode
+                [ -n "$mode" ] && archmode enable "$mode"
+                read -p "Press Enter to continue..."
+                ;;
+            3) system_health_check; read -p "Press Enter to continue..."; ;;
+            4) monitor_dashboard 2; ;;
+            5) process_manager list; read -p "Press Enter to continue..."; ;;
+            6) system_cleanup all; read -p "Press Enter to continue..."; ;;
+            7) network_analyzer; read -p "Press Enter to continue..."; ;;
+            8) gpu_manager info; read -p "Press Enter to continue..."; ;;
+            9) system_optimizer; read -p "Press Enter to continue..."; ;;
+            10) 
+                read -p "Enter time (HH:MM): " time
+                read -p "Enter mode: " mode
+                [ -n "$time" ] && [ -n "$mode" ] && schedule_mode "$time" "$mode"
+                read -p "Press Enter to continue..."
+                ;;
+            11) 
+                list_mods
+                list_plugins
+                read -p "Press Enter to continue..."
+                ;;
+            12) 
+                show_security
+                show_privacy
+                read -p "Press Enter to continue..."
+                ;;
+            0) echo -e "${GREEN}Goodbye!${NC}"; exit 0; ;;
+            *) echo -e "${RED}Invalid option${NC}"; sleep 1; ;;
+        esac
+    done
+}
+
 # Help / usage
 show_help() {
     echo -e "${CYAN}${BOLD}"
@@ -2164,6 +2859,25 @@ show_help() {
     echo "  privacy                Show privacy settings"
     echo "  privacy <setting> <value> Configure privacy setting"
     echo ""
+    echo -e "${BOLD}Monitoring & Health:${NC}"
+    echo "  health                 Run comprehensive system health check"
+    echo "  monitor [refresh]      Real-time monitoring dashboard (default: 2s)"
+    echo "  temp [threshold]       Monitor temperature with alerts (default: 80°C)"
+    echo ""
+    echo -e "${BOLD}Automation:${NC}"
+    echo "  schedule <time> <mode> Schedule mode activation (HH:MM format)"
+    echo "  schedule-list          List scheduled modes"
+    echo ""
+    echo -e "${BOLD}Process Management:${NC}"
+    echo "  process [list|kill|priority] [target] Manage processes"
+    echo ""
+    echo -e "${BOLD}System Tools:${NC}"
+    echo "  cleanup [type]         Clean system (cache|temp|logs|home|all)"
+    echo "  network                Network analyzer and diagnostics"
+    echo "  gpu [info|monitor]     GPU information and monitoring"
+    echo "  optimize               One-click system optimization"
+    echo "  dashboard              Interactive dashboard menu"
+    echo ""
     echo -e "${BOLD}System Commands:${NC}"
     echo "  update                 Update ArchMode (ULTIMATE update system)"
     echo "  uninstall              Uninstall ArchMode from system"
@@ -2186,7 +2900,7 @@ show_help() {
 # Argument parsing
 # ============================================
 
-command="${1:-help}"
+command="${1:-dashboard}"
 argument="${2:-}"
 argument2="${3:-}"
 
@@ -2244,6 +2958,42 @@ case "$command" in
         ;;
     benchmark)
         benchmark_performance
+        ;;
+    health)
+        system_health_check
+        ;;
+    monitor)
+        monitor_dashboard "${argument:-2}"
+        ;;
+    temp)
+        temp_monitor "${argument:-80}"
+        ;;
+    schedule)
+        schedule_mode "$argument" "$argument2"
+        ;;
+    schedule-list)
+        list_schedule
+        ;;
+    schedule-run)
+        schedule_run
+        ;;
+    process)
+        process_manager "$argument" "$argument2"
+        ;;
+    cleanup)
+        system_cleanup "${argument:-all}"
+        ;;
+    network)
+        network_analyzer
+        ;;
+    gpu)
+        gpu_manager "$argument"
+        ;;
+    optimize)
+        system_optimizer
+        ;;
+    dashboard)
+        interactive_dashboard
         ;;
     mods)
         list_mods
