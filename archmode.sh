@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ArchMode - System Mode Manager for Arch Linux
-# Version: 5.0.0 - ULTIMATE EDITION
+# Version: 6.0.0 - ULTIMATE EDITION
 # THE BEST SYSTEM MANAGEMENT TOOL - Complete System Control
 # With Mods, Plugins, Security, Privacy, Monitoring, Automation & More!
 #
@@ -19,7 +19,15 @@
 # - Security & Privacy Controls
 # - Interactive Dashboard
 
-set -euo pipefail
+set -eo pipefail
+# Debug mode - set ARCHMODE_DEBUG=1 to enable
+ARCHMODE_DEBUG=${ARCHMODE_DEBUG:-0}
+[ "$ARCHMODE_DEBUG" = "1" ] && set -x || true
+
+# Debug logging function
+debug_log() {
+    [ "$ARCHMODE_DEBUG" = "1" ] && echo -e "${MAGENTA}[DEBUG] $*${NC}" >&2 || true
+}
 
 # Colors
 RED='\033[0;31m'
@@ -49,7 +57,7 @@ HEALTH_FILE="$LOG_DIR/health_report.txt"
 TEMP_ALERT_FILE="$CONFIG_DIR/temp_alerts.conf"
 AUTOMODE_FILE="$CONFIG_DIR/automode.conf"
 AUTOMODE_PID_FILE="$LOG_DIR/automode.pid"
-VERSION="5.0.0"
+VERSION="6.0.0"
 
 # Performance: Cache state in memory
 declare -A STATE_CACHE
@@ -949,7 +957,7 @@ set_privacy_setting() {
 show_security() {
     echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║        Security Settings               ║"
+    echo "║        Security Settings              ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
@@ -2019,28 +2027,75 @@ update_archmode() {
     rm -rf "$TEMP_DIR"
     echo -e "${GREEN}✓ Temporary files cleaned${NC}"
     
-    # Remove ALL old backup versions to prevent conflicts
-    echo -e "${CYAN}➜ Cleaning up old versions to prevent conflicts...${NC}"
-    local backups=($(ls -t "$INSTALLED_SCRIPT".backup.* 2>/dev/null))
-    if [ ${#backups[@]} -gt 1 ]; then
-        # Keep only the most recent backup, remove all others
-        for ((i=1; i<${#backups[@]}; i++)); do
-            sudo rm -f "${backups[$i]}" 2>/dev/null || true
+    # Remove ALL old backup versions to prevent conflicts and save storage
+    echo -e "${CYAN}➜ Cleaning up old versions to save storage...${NC}"
+    debug_log "Cleaning up old backups from $INSTALLED_SCRIPT.backup.*"
+    
+    # Find all backup files
+    local backups=($(ls -t "$INSTALLED_SCRIPT".backup.* 2>/dev/null | head -1))
+    local backup_count=$(ls -1 "$INSTALLED_SCRIPT".backup.* 2>/dev/null | wc -l)
+    
+    if [ "$backup_count" -gt 1 ]; then
+        # Keep only the most recent backup, remove ALL others
+        local kept_backup=""
+        local removed_count=0
+        
+        for backup_file in "$INSTALLED_SCRIPT".backup.*; do
+            if [ -f "$backup_file" ]; then
+                if [ -z "$kept_backup" ]; then
+                    # Keep the first (most recent) one
+                    kept_backup="$backup_file"
+                    debug_log "Keeping backup: $kept_backup"
+                else
+                    # Remove all others
+                    debug_log "Removing old backup: $backup_file"
+                    sudo rm -f "$backup_file" 2>/dev/null && ((removed_count++)) || true
+                fi
+            fi
         done
-        echo -e "${GREEN}✓ Old versions cleaned (kept latest backup)${NC}"
+        
+        if [ "$removed_count" -gt 0 ]; then
+            echo -e "${GREEN}✓ Removed $removed_count old backup(s), kept latest${NC}"
+        fi
+    elif [ "$backup_count" -eq 1 ]; then
+        kept_backup=$(ls -1 "$INSTALLED_SCRIPT".backup.* 2>/dev/null | head -1)
+        echo -e "${GREEN}✓ Only one backup exists (keeping it)${NC}"
+    else
+        echo -e "${CYAN}→ No old backups to clean${NC}"
     fi
     
-    # Also clean up any old version files in /usr/local/bin
+    # Also clean up any old version files in /usr/local/bin (archmode.* but not archmode itself)
+    local old_files_removed=0
     for old_file in /usr/local/bin/archmode.*; do
-        if [ -f "$old_file" ] && [ "$old_file" != "$INSTALLED_SCRIPT" ] && [ "$old_file" != "${backups[0]:-}" ]; then
-            sudo rm -f "$old_file" 2>/dev/null || true
+        if [ -f "$old_file" ] && [ "$old_file" != "$INSTALLED_SCRIPT" ]; then
+            # Check if it's not the backup we're keeping
+            if [ -z "$kept_backup" ] || [ "$old_file" != "$kept_backup" ]; then
+                debug_log "Removing old file: $old_file"
+                sudo rm -f "$old_file" 2>/dev/null && ((old_files_removed++)) || true
+            fi
         fi
     done
+    
+    if [ "$old_files_removed" -gt 0 ]; then
+        echo -e "${GREEN}✓ Removed $old_files_removed old version file(s)${NC}"
+    fi
+    
+    # Clean up any temporary update files
+    local temp_update_files=$(find /usr/local/bin -name "archmode.tmp.*" -o -name "archmode.new.*" 2>/dev/null | wc -l)
+    if [ "$temp_update_files" -gt 0 ]; then
+        find /usr/local/bin -name "archmode.tmp.*" -o -name "archmode.new.*" 2>/dev/null | xargs sudo rm -f 2>/dev/null || true
+        echo -e "${GREEN}✓ Cleaned up temporary update files${NC}"
+    fi
+    
+    # Show storage saved
+    local current_size=$(du -h "$INSTALLED_SCRIPT" 2>/dev/null | cut -f1)
+    echo -e "${CYAN}Current script size: ${BOLD}$current_size${NC}"
+    echo -e "${GREEN}✓ Storage cleanup complete${NC}"
     
     echo ""
     echo -e "${GREEN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║      Update Complete! 🎉              ║"
+    echo "║      Update Complete! 🎉               ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
@@ -2609,6 +2664,8 @@ temp_monitor() {
     echo -e "${YELLOW}Press Ctrl+C to exit${NC}"
     echo ""
     
+    [ "$ARCHMODE_DEBUG" = "1" ] && echo -e "${MAGENTA}[DEBUG] Temperature threshold: ${threshold}°C${NC}" || true
+    
     while true; do
         clear
         echo -e "${CYAN}${BOLD}"
@@ -2619,87 +2676,153 @@ temp_monitor() {
         echo ""
         
         local alert=false
+        local temp_found=false
         
-        # CPU Temperature (multiple sensors)
+        # CPU Temperature (multiple sensors) - FIX: Use process substitution to avoid subshell
         if has_capability "sensors"; then
             echo -e "${BOLD}CPU Temperatures:${NC}"
-            sensors 2>/dev/null | grep -iE 'Package id 0|Tdie|Tctl|Core 0|CPU' | while read -r line; do
-                local sensor_name=$(echo "$line" | awk -F: '{print $1}' | sed 's/^[[:space:]]*//')
-                local temp_str=$(echo "$line" | awk '{print $2}' | sed 's/+//;s/°C//;s/°F//')
-                local temp_num=$(echo "$temp_str" | grep -oE '[0-9]+' | head -1)
+            local sensors_output=$(sensors 2>/dev/null)
+            [ "$ARCHMODE_DEBUG" = "1" ] && echo -e "${MAGENTA}[DEBUG] Sensors output length: ${#sensors_output}${NC}" || true
+            
+            # Try multiple patterns to find CPU temperature
+            local cpu_temp=""
+            local cpu_temp_num=""
+            
+            # Try Package temperature first (most common)
+            cpu_temp=$(echo "$sensors_output" | grep -iE 'Package id 0|Package.*id.*0' | head -1 | grep -oE '\+[0-9]+\.[0-9]+°C|\+[0-9]+°C' | head -1 | sed 's/+//;s/°C//')
+            [ -z "$cpu_temp" ] && cpu_temp=$(echo "$sensors_output" | grep -iE '^Package' | head -1 | grep -oE '\+[0-9]+\.[0-9]+°C|\+[0-9]+°C' | head -1 | sed 's/+//;s/°C//')
+            
+            # Try Tdie/Tctl (AMD)
+            [ -z "$cpu_temp" ] && cpu_temp=$(echo "$sensors_output" | grep -iE 'Tdie|Tctl' | head -1 | grep -oE '\+[0-9]+\.[0-9]+°C|\+[0-9]+°C' | head -1 | sed 's/+//;s/°C//')
+            
+            # Try Core 0
+            [ -z "$cpu_temp" ] && cpu_temp=$(echo "$sensors_output" | grep -iE 'Core 0|CPU Core' | head -1 | grep -oE '\+[0-9]+\.[0-9]+°C|\+[0-9]+°C' | head -1 | sed 's/+//;s/°C//')
+            
+            # Extract numeric value
+            if [ -n "$cpu_temp" ]; then
+                cpu_temp_num=$(echo "$cpu_temp" | grep -oE '[0-9]+' | head -1)
+                [ "$ARCHMODE_DEBUG" = "1" ] && echo -e "${MAGENTA}[DEBUG] Found CPU temp: ${cpu_temp} (numeric: ${cpu_temp_num})${NC}" || true
+            fi
+            
+            if [ -n "$cpu_temp_num" ] && [ "$cpu_temp_num" -gt 0 ]; then
+                temp_found=true
+                if [ "$cpu_temp_num" -gt "$threshold" ]; then
+                    echo -e "  ${RED}⚠ CPU Package: ${cpu_temp}°C${NC}"
+                    alert=true
+                elif [ "$cpu_temp_num" -gt $((threshold - 10)) ]; then
+                    echo -e "  ${YELLOW}→ CPU Package: ${cpu_temp}°C${NC}"
+                else
+                    echo -e "  ${GREEN}✓ CPU Package: ${cpu_temp}°C${NC}"
+                fi
+            fi
+            
+            # Show all CPU cores - use process substitution to avoid subshell
+            while IFS= read -r line; do
+                local core_name=$(echo "$line" | awk -F: '{print $1}' | sed 's/^[[:space:]]*//')
+                local core_temp=$(echo "$line" | grep -oE '\+[0-9]+\.[0-9]+°C|\+[0-9]+°C' | head -1 | sed 's/+//;s/°C//')
+                local core_temp_num=$(echo "$core_temp" | grep -oE '[0-9]+' | head -1)
                 
-                if [ -n "$temp_num" ]; then
-                    if [ "$temp_num" -gt "$threshold" ]; then
-                        echo -e "  ${RED}⚠ $sensor_name: ${temp_str}${NC}"
+                if [ -n "$core_temp_num" ] && [ "$core_temp_num" -gt 0 ]; then
+                    if [ "$core_temp_num" -gt "$threshold" ]; then
+                        echo -e "  ${RED}⚠ $core_name: ${core_temp}°C${NC}"
                         alert=true
-                    elif [ "$temp_num" -gt $((threshold - 10)) ]; then
-                        echo -e "  ${YELLOW}→ $sensor_name: ${temp_str}${NC}"
+                    elif [ "$core_temp_num" -gt $((threshold - 10)) ]; then
+                        echo -e "  ${YELLOW}→ $core_name: ${core_temp}°C${NC}"
                     else
-                        echo -e "  ${GREEN}✓ $sensor_name: ${temp_str}${NC}"
+                        echo -e "  ${GREEN}✓ $core_name: ${core_temp}°C${NC}"
                     fi
                 fi
-            done
+            done < <(echo "$sensors_output" | grep -iE 'Core [0-9]+|CPU [0-9]+')
+            
+            if [ "$temp_found" = false ]; then
+                echo -e "  ${YELLOW}⚠ No CPU temperature sensors found${NC}"
+                [ "$ARCHMODE_DEBUG" = "1" ] && echo -e "${MAGENTA}[DEBUG] Sensors output:\n$sensors_output${NC}" || true
+            fi
         else
             echo -e "${YELLOW}⚠ Install 'lm_sensors' for CPU temperature monitoring${NC}"
+            echo -e "${CYAN}  Run: sudo pacman -S lm_sensors && sudo sensors-detect${NC}"
         fi
         echo ""
         
         # GPU Temperature
         if command -v nvidia-smi &>/dev/null; then
             echo -e "${BOLD}GPU Temperatures (NVIDIA):${NC}"
-            nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits 2>/dev/null | while read -r temp; do
-                if [ -n "$temp" ] && [ "$temp" -gt "$threshold" ]; then
-                    echo -e "  ${RED}⚠ GPU: ${temp}°C${NC}"
-                    alert=true
-                elif [ -n "$temp" ] && [ "$temp" -gt $((threshold - 10)) ]; then
-                    echo -e "  ${YELLOW}→ GPU: ${temp}°C${NC}"
-                elif [ -n "$temp" ]; then
-                    echo -e "  ${GREEN}✓ GPU: ${temp}°C${NC}"
-                fi
-            done
+            local gpu_temps=$(nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits 2>/dev/null)
+            if [ -n "$gpu_temps" ]; then
+                while IFS= read -r temp; do
+                    temp=${temp// /}  # Remove spaces
+                    if [ -n "$temp" ] && [ "$temp" -gt 0 ] && [ "$temp" -le 150 ]; then
+                        if [ "$temp" -gt "$threshold" ]; then
+                            echo -e "  ${RED}⚠ GPU: ${temp}°C${NC}"
+                            alert=true
+                        elif [ "$temp" -gt $((threshold - 10)) ]; then
+                            echo -e "  ${YELLOW}→ GPU: ${temp}°C${NC}"
+                        else
+                            echo -e "  ${GREEN}✓ GPU: ${temp}°C${NC}"
+                        fi
+                    fi
+                done < <(echo "$gpu_temps")
+            else
+                echo -e "  ${YELLOW}⚠ No NVIDIA GPU temperature data${NC}"
+            fi
         elif [ -d /sys/class/drm ]; then
             # AMD GPU
+            echo -e "${BOLD}GPU Temperatures (AMD):${NC}"
+            local amd_found=false
             for card in /sys/class/drm/card*/device/hwmon/hwmon*/temp1_input; do
                 if [ -f "$card" ]; then
+                    amd_found=true
                     local temp_raw=$(cat "$card" 2>/dev/null)
-                    local temp=$((temp_raw / 1000))
-                    if [ "$temp" -gt "$threshold" ]; then
-                        echo -e "  ${RED}⚠ GPU: ${temp}°C${NC}"
-                        alert=true
-                    elif [ "$temp" -gt $((threshold - 10)) ]; then
-                        echo -e "  ${YELLOW}→ GPU: ${temp}°C${NC}"
-                    else
-                        echo -e "  ${GREEN}✓ GPU: ${temp}°C${NC}"
+                    if [ -n "$temp_raw" ] && [ "$temp_raw" -gt 0 ]; then
+                        local temp=$((temp_raw / 1000))
+                        local card_name=$(echo "$card" | sed 's|.*card\([0-9]*\).*|\1|')
+                        if [ "$temp" -gt "$threshold" ]; then
+                            echo -e "  ${RED}⚠ GPU Card${card_name}: ${temp}°C${NC}"
+                            alert=true
+                        elif [ "$temp" -gt $((threshold - 10)) ]; then
+                            echo -e "  ${YELLOW}→ GPU Card${card_name}: ${temp}°C${NC}"
+                        else
+                            echo -e "  ${GREEN}✓ GPU Card${card_name}: ${temp}°C${NC}"
+                        fi
                     fi
                 fi
             done
+            [ "$amd_found" = false ] && echo -e "  ${YELLOW}⚠ No AMD GPU temperature sensors found${NC}" || true
         fi
         echo ""
         
         # NVMe SSD Temperature
         echo -e "${BOLD}NVMe SSD Temperatures:${NC}"
+        local nvme_found=false
         for nvme in /sys/class/nvme/*/device/hwmon/hwmon*/temp1_input; do
             if [ -f "$nvme" ]; then
+                nvme_found=true
                 local nvme_name=$(echo "$nvme" | sed 's|.*nvme/\([^/]*\).*|\1|')
                 local temp_raw=$(cat "$nvme" 2>/dev/null)
-                local temp=$((temp_raw / 1000))
-                if [ "$temp" -gt 70 ]; then
-                    echo -e "  ${RED}⚠ $nvme_name: ${temp}°C${NC}"
-                    alert=true
-                elif [ "$temp" -gt 60 ]; then
-                    echo -e "  ${YELLOW}→ $nvme_name: ${temp}°C${NC}"
-                else
-                    echo -e "  ${GREEN}✓ $nvme_name: ${temp}°C${NC}"
+                if [ -n "$temp_raw" ] && [ "$temp_raw" -gt 0 ]; then
+                    local temp=$((temp_raw / 1000))
+                    if [ "$temp" -gt 70 ]; then
+                        echo -e "  ${RED}⚠ $nvme_name: ${temp}°C${NC}"
+                        alert=true
+                    elif [ "$temp" -gt 60 ]; then
+                        echo -e "  ${YELLOW}→ $nvme_name: ${temp}°C${NC}"
+                    else
+                        echo -e "  ${GREEN}✓ $nvme_name: ${temp}°C${NC}"
+                    fi
                 fi
             fi
         done
+        [ "$nvme_found" = false ] && echo -e "  ${CYAN}→ No NVMe temperature sensors found${NC}" || true
         
-        # Traditional SATA SSD/HDD Temperature (via hddtemp or smartctl)
+        # Traditional SATA SSD/HDD Temperature (via smartctl)
         if command -v smartctl &>/dev/null; then
+            echo -e "${BOLD}Storage Temperatures:${NC}"
+            local storage_found=false
             for disk in /dev/sd[a-z] /dev/nvme[0-9]n[0-9]; do
-                if [ -b "$disk" ]; then
-                    local temp=$(smartctl -A "$disk" 2>/dev/null | grep -i "Temperature_Celsius" | awk '{print $10}' | head -1)
-                    if [ -n "$temp" ] && [ "$temp" != "-" ]; then
+                if [ -b "$disk" ] 2>/dev/null; then
+                    local temp=$(smartctl -A "$disk" 2>/dev/null | grep -iE "Temperature_Celsius|Temperature" | awk '{print $10}' | head -1)
+                    if [ -n "$temp" ] && [ "$temp" != "-" ] && [ "$temp" -gt 0 ] && [ "$temp" -lt 200 ]; then
+                        storage_found=true
                         local disk_name=$(basename "$disk")
                         if [ "$temp" -gt 60 ]; then
                             echo -e "  ${YELLOW}→ $disk_name: ${temp}°C${NC}"
@@ -2709,17 +2832,18 @@ temp_monitor() {
                     fi
                 fi
             done
+            [ "$storage_found" = false ] && echo -e "  ${CYAN}→ No storage temperature data available${NC}" || true
         fi
         echo ""
         
         # Alert notification
         if [ "$alert" = true ]; then
             if command -v notify-send &>/dev/null; then
-                notify-send "Temperature Alert" "One or more temperatures exceed ${threshold}°C" -u critical
+                notify-send "Temperature Alert" "One or more temperatures exceed ${threshold}°C" -u critical 2>/dev/null || true
             fi
         fi
         
-        echo -e "${CYAN}Last updated: $(date '+%H:%M:%S')${NC}"
+        echo -e "${CYAN}Last updated: $(date '+%H:%M:%S') | Threshold: ${threshold}°C${NC}"
         sleep 5
     done
 }
@@ -3651,7 +3775,8 @@ show_help() {
     echo "  dashboard              Interactive dashboard menu"
     echo ""
     echo -e "${BOLD}System Commands:${NC}"
-    echo "  update                 Update ArchMode (ULTIMATE update system)"
+    echo "  update                 Update ArchMode (removes old versions, saves storage)"
+    echo "  debug [on|off]         Enable/disable debug mode (or set ARCHMODE_DEBUG=1)"
     echo "  uninstall              Uninstall ArchMode from system"
     echo "  help                   Show this help message"
     echo ""
@@ -3873,6 +3998,27 @@ case "$command" in
         ;;
     update)
         update_archmode
+        ;;
+    debug)
+        if [ "$argument" = "on" ] || [ "$argument" = "enable" ] || [ "$argument" = "1" ]; then
+            export ARCHMODE_DEBUG=1
+            echo -e "${GREEN}✓ Debug mode enabled${NC}"
+            echo -e "${CYAN}Run commands with ARCHMODE_DEBUG=1 to see debug output${NC}"
+        elif [ "$argument" = "off" ] || [ "$argument" = "disable" ] || [ "$argument" = "0" ]; then
+            export ARCHMODE_DEBUG=0
+            echo -e "${GREEN}✓ Debug mode disabled${NC}"
+        else
+            if [ "$ARCHMODE_DEBUG" = "1" ]; then
+                echo -e "${GREEN}Debug mode is currently: ${BOLD}ENABLED${NC}"
+            else
+                echo -e "${YELLOW}Debug mode is currently: ${BOLD}DISABLED${NC}"
+            fi
+            echo ""
+            echo "Usage: archmode debug [on|off|enable|disable|1|0]"
+            echo "Or set ARCHMODE_DEBUG=1 before running commands"
+            echo ""
+            echo "Example: ARCHMODE_DEBUG=1 archmode temp"
+        fi
         ;;
     uninstall)
         uninstall_archmode
