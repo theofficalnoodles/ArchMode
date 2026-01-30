@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ArchMode - System Mode Manager for Arch Linux
-# Version: 4.0.0 - ULTIMATE EDITION
+# Version: 5.0.0 - ULTIMATE EDITION
 # THE BEST SYSTEM MANAGEMENT TOOL - Complete System Control
 # With Mods, Plugins, Security, Privacy, Monitoring, Automation & More!
 #
@@ -49,7 +49,7 @@ HEALTH_FILE="$LOG_DIR/health_report.txt"
 TEMP_ALERT_FILE="$CONFIG_DIR/temp_alerts.conf"
 AUTOMODE_FILE="$CONFIG_DIR/automode.conf"
 AUTOMODE_PID_FILE="$LOG_DIR/automode.pid"
-VERSION="4.0.0"
+VERSION="5.0.0"
 
 # Performance: Cache state in memory
 declare -A STATE_CACHE
@@ -226,7 +226,7 @@ get_state() {
 # Set state (optimized with caching)
 set_state() {
     local item=$1
-    local state=$2
+    local state=${2:-}
     
     load_state_cache
     STATE_CACHE["$item"]="$state"
@@ -456,7 +456,7 @@ optimize_irq_balancing() {
 # Helper: Set process priority and scheduling (advanced)
 set_process_priority() {
     local pid=$1
-    local nice=$2
+    local nice=${2:-0}
     local sched=${3:-SCHED_OTHER}
     
     if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
@@ -909,7 +909,7 @@ get_security_setting() {
 # Set security setting
 set_security_setting() {
     local setting=$1
-    local value=$2
+    local value=${2:-}
     
     if grep -q "^$setting=" "$SECURITY_FILE" 2>/dev/null; then
         sed -i "s/^$setting=.*/$setting=$value/" "$SECURITY_FILE"
@@ -935,7 +935,7 @@ get_privacy_setting() {
 # Set privacy setting
 set_privacy_setting() {
     local setting=$1
-    local value=$2
+    local value=${2:-}
     
     if grep -q "^$setting=" "$PRIVACY_FILE" 2>/dev/null; then
         sed -i "s/^$setting=.*/$setting=$value/" "$PRIVACY_FILE"
@@ -949,7 +949,7 @@ set_privacy_setting() {
 show_security() {
     echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║        Security Settings              ║"
+    echo "║        Security Settings               ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
@@ -2489,7 +2489,7 @@ schedule_run() {
 
 process_manager() {
     local action=$(echo "${1:-list}" | tr '[:upper:]' '[:lower:]')
-    local target=$2
+    local target=${2:-}
     
     case "$action" in
         list|"")
@@ -2547,7 +2547,7 @@ system_cleanup() {
     
     echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║        System Cleanup                   ║"
+    echo "║        System Cleanup                  ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
@@ -2600,30 +2600,126 @@ system_cleanup() {
 temp_monitor() {
     local threshold=${1:-80}
     
-    if ! has_capability "sensors"; then
-        echo -e "${RED}✗ Install 'lm_sensors' for temperature monitoring${NC}"
-        return 1
-    fi
-    
     echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║    Temperature Monitor                 ║"
+    echo "║    Enhanced Temperature Monitor        ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
-    echo -e "${YELLOW}Monitoring temperature (threshold: ${threshold}°C)${NC}"
+    echo -e "${YELLOW}Monitoring temperatures (threshold: ${threshold}°C)${NC}"
     echo -e "${YELLOW}Press Ctrl+C to exit${NC}"
     echo ""
     
     while true; do
-        local temp=$(sensors 2>/dev/null | grep -iE 'Package id 0|Tdie|Tctl' | awk '{print $2}' | sed 's/+//;s/°C//' | grep -oE '[0-9]+' | head -1)
-        if [ -n "$temp" ] && [ "$temp" -gt "$threshold" ]; then
-            echo -e "${RED}${BOLD}⚠ ALERT: Temperature ${temp}°C exceeds threshold ${threshold}°C!${NC}"
-            if command -v notify-send &>/dev/null; then
-                notify-send "Temperature Alert" "CPU temperature: ${temp}°C" -u critical
-            fi
+        clear
+        echo -e "${CYAN}${BOLD}"
+        echo "╔════════════════════════════════════════╗"
+        echo "║    Temperature Sensors                 ║"
+        echo "╚════════════════════════════════════════╝"
+        echo -e "${NC}"
+        echo ""
+        
+        local alert=false
+        
+        # CPU Temperature (multiple sensors)
+        if has_capability "sensors"; then
+            echo -e "${BOLD}CPU Temperatures:${NC}"
+            sensors 2>/dev/null | grep -iE 'Package id 0|Tdie|Tctl|Core 0|CPU' | while read -r line; do
+                local sensor_name=$(echo "$line" | awk -F: '{print $1}' | sed 's/^[[:space:]]*//')
+                local temp_str=$(echo "$line" | awk '{print $2}' | sed 's/+//;s/°C//;s/°F//')
+                local temp_num=$(echo "$temp_str" | grep -oE '[0-9]+' | head -1)
+                
+                if [ -n "$temp_num" ]; then
+                    if [ "$temp_num" -gt "$threshold" ]; then
+                        echo -e "  ${RED}⚠ $sensor_name: ${temp_str}${NC}"
+                        alert=true
+                    elif [ "$temp_num" -gt $((threshold - 10)) ]; then
+                        echo -e "  ${YELLOW}→ $sensor_name: ${temp_str}${NC}"
+                    else
+                        echo -e "  ${GREEN}✓ $sensor_name: ${temp_str}${NC}"
+                    fi
+                fi
+            done
         else
-            echo -e "${GREEN}✓ Temperature: ${temp}°C${NC}"
+            echo -e "${YELLOW}⚠ Install 'lm_sensors' for CPU temperature monitoring${NC}"
         fi
+        echo ""
+        
+        # GPU Temperature
+        if command -v nvidia-smi &>/dev/null; then
+            echo -e "${BOLD}GPU Temperatures (NVIDIA):${NC}"
+            nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits 2>/dev/null | while read -r temp; do
+                if [ -n "$temp" ] && [ "$temp" -gt "$threshold" ]; then
+                    echo -e "  ${RED}⚠ GPU: ${temp}°C${NC}"
+                    alert=true
+                elif [ -n "$temp" ] && [ "$temp" -gt $((threshold - 10)) ]; then
+                    echo -e "  ${YELLOW}→ GPU: ${temp}°C${NC}"
+                elif [ -n "$temp" ]; then
+                    echo -e "  ${GREEN}✓ GPU: ${temp}°C${NC}"
+                fi
+            done
+        elif [ -d /sys/class/drm ]; then
+            # AMD GPU
+            for card in /sys/class/drm/card*/device/hwmon/hwmon*/temp1_input; do
+                if [ -f "$card" ]; then
+                    local temp_raw=$(cat "$card" 2>/dev/null)
+                    local temp=$((temp_raw / 1000))
+                    if [ "$temp" -gt "$threshold" ]; then
+                        echo -e "  ${RED}⚠ GPU: ${temp}°C${NC}"
+                        alert=true
+                    elif [ "$temp" -gt $((threshold - 10)) ]; then
+                        echo -e "  ${YELLOW}→ GPU: ${temp}°C${NC}"
+                    else
+                        echo -e "  ${GREEN}✓ GPU: ${temp}°C${NC}"
+                    fi
+                fi
+            done
+        fi
+        echo ""
+        
+        # NVMe SSD Temperature
+        echo -e "${BOLD}NVMe SSD Temperatures:${NC}"
+        for nvme in /sys/class/nvme/*/device/hwmon/hwmon*/temp1_input; do
+            if [ -f "$nvme" ]; then
+                local nvme_name=$(echo "$nvme" | sed 's|.*nvme/\([^/]*\).*|\1|')
+                local temp_raw=$(cat "$nvme" 2>/dev/null)
+                local temp=$((temp_raw / 1000))
+                if [ "$temp" -gt 70 ]; then
+                    echo -e "  ${RED}⚠ $nvme_name: ${temp}°C${NC}"
+                    alert=true
+                elif [ "$temp" -gt 60 ]; then
+                    echo -e "  ${YELLOW}→ $nvme_name: ${temp}°C${NC}"
+                else
+                    echo -e "  ${GREEN}✓ $nvme_name: ${temp}°C${NC}"
+                fi
+            fi
+        done
+        
+        # Traditional SATA SSD/HDD Temperature (via hddtemp or smartctl)
+        if command -v smartctl &>/dev/null; then
+            for disk in /dev/sd[a-z] /dev/nvme[0-9]n[0-9]; do
+                if [ -b "$disk" ]; then
+                    local temp=$(smartctl -A "$disk" 2>/dev/null | grep -i "Temperature_Celsius" | awk '{print $10}' | head -1)
+                    if [ -n "$temp" ] && [ "$temp" != "-" ]; then
+                        local disk_name=$(basename "$disk")
+                        if [ "$temp" -gt 60 ]; then
+                            echo -e "  ${YELLOW}→ $disk_name: ${temp}°C${NC}"
+                        else
+                            echo -e "  ${GREEN}✓ $disk_name: ${temp}°C${NC}"
+                        fi
+                    fi
+                fi
+            done
+        fi
+        echo ""
+        
+        # Alert notification
+        if [ "$alert" = true ]; then
+            if command -v notify-send &>/dev/null; then
+                notify-send "Temperature Alert" "One or more temperatures exceed ${threshold}°C" -u critical
+            fi
+        fi
+        
+        echo -e "${CYAN}Last updated: $(date '+%H:%M:%S')${NC}"
         sleep 5
     done
 }
@@ -2723,6 +2819,402 @@ gpu_manager() {
             return 1
             ;;
     esac
+}
+
+# ============================================
+# AUTOMATIC CHARGER DETECTION & MODE SWITCHING
+# ============================================
+
+# Check if AC power is connected
+check_ac_power() {
+    if [ -d /sys/class/power_supply ]; then
+        for supply in /sys/class/power_supply/*; do
+            if [ -f "$supply/type" ] && grep -q "Mains\|AC" "$supply/type" 2>/dev/null; then
+                if [ -f "$supply/online" ]; then
+                    local online=$(cat "$supply/online" 2>/dev/null)
+                    [ "$online" = "1" ] && return 0
+                fi
+            fi
+        done
+    fi
+    # Fallback: check via upower if available
+    if command -v upower &>/dev/null; then
+        upower -i $(upower -e | grep 'BAT\|battery' | head -1) 2>/dev/null | grep -q "state.*discharging" && return 1 || return 0
+    fi
+    return 1
+}
+
+# Monitor AC power and auto-switch modes
+auto_charger_monitor() {
+    local last_state=""
+    local ac_mode=${1:-PERFORMANCE}
+    local battery_mode=${2:-POWERSAVE}
+    
+    echo -e "${CYAN}${BOLD}"
+    echo "╔════════════════════════════════════════╗"
+    echo "║    Automatic Charger Detection         ║"
+    echo "╚════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+    echo -e "${CYAN}AC Mode: ${ac_mode}${NC}"
+    echo -e "${CYAN}Battery Mode: ${battery_mode}${NC}"
+    echo -e "${YELLOW}Monitoring power state... (Press Ctrl+C to exit)${NC}"
+    echo ""
+    
+    # Save PID for stopping
+    echo $$ > "$LOG_DIR/charger_monitor.pid"
+    
+    while true; do
+        if check_ac_power; then
+            if [ "$last_state" != "AC" ]; then
+                echo -e "${GREEN}✓ AC power connected - Switching to ${ac_mode} mode${NC}"
+                enable_mode "$ac_mode" 2>/dev/null
+                last_state="AC"
+                if command -v notify-send &>/dev/null; then
+                    notify-send "ArchMode" "AC power connected - ${ac_mode} mode activated"
+                fi
+            fi
+        else
+            if [ "$last_state" != "BATTERY" ]; then
+                echo -e "${YELLOW}⚠ AC power disconnected - Switching to ${battery_mode} mode${NC}"
+                enable_mode "$battery_mode" 2>/dev/null
+                last_state="BATTERY"
+                if command -v notify-send &>/dev/null; then
+                    notify-send "ArchMode" "Running on battery - ${battery_mode} mode activated"
+                fi
+            fi
+        fi
+        sleep 2
+    done
+}
+
+# Start automatic charger monitoring in background
+start_auto_charger() {
+    local ac_mode=${1:-PERFORMANCE}
+    local battery_mode=${2:-POWERSAVE}
+    
+    if [ -f "$LOG_DIR/charger_monitor.pid" ]; then
+        local old_pid=$(cat "$LOG_DIR/charger_monitor.pid" 2>/dev/null)
+        if kill -0 "$old_pid" 2>/dev/null; then
+            echo -e "${YELLOW}⚠ Charger monitor already running (PID: $old_pid)${NC}"
+            return 1
+        fi
+    fi
+    
+    auto_charger_monitor "$ac_mode" "$battery_mode" &
+    echo -e "${GREEN}✓ Automatic charger detection started${NC}"
+    log "Auto charger monitor started (AC: $ac_mode, Battery: $battery_mode)"
+}
+
+# Stop automatic charger monitoring
+stop_auto_charger() {
+    if [ -f "$LOG_DIR/charger_monitor.pid" ]; then
+        local pid=$(cat "$LOG_DIR/charger_monitor.pid" 2>/dev/null)
+        if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null
+            rm -f "$LOG_DIR/charger_monitor.pid"
+            echo -e "${GREEN}✓ Automatic charger detection stopped${NC}"
+            log "Auto charger monitor stopped"
+        else
+            echo -e "${YELLOW}⚠ Charger monitor not running${NC}"
+            rm -f "$LOG_DIR/charger_monitor.pid"
+        fi
+    else
+        echo -e "${YELLOW}⚠ Charger monitor not running${NC}"
+    fi
+}
+
+# ============================================
+# ASPM & PCIe LINK POWER MANAGEMENT
+# ============================================
+
+# Enable ASPM (Active State Power Management)
+enable_aspm() {
+    if ! check_sudo; then
+        echo -e "${RED}✗ Sudo required for ASPM management${NC}"
+        return 1
+    fi
+    
+    echo -e "${CYAN}Enabling ASPM and PCIe link power management...${NC}"
+    
+    # Enable ASPM for PCIe devices
+    for pcie_dev in /sys/bus/pci/devices/*; do
+        if [ -f "$pcie_dev/power/control" ]; then
+            echo "auto" | sudo tee "$pcie_dev/power/control" > /dev/null 2>&1
+        fi
+    done
+    
+    # Set PCIe ASPM policy
+    if [ -f /sys/module/pcie_aspm/parameters/policy ]; then
+        echo "powersave" | sudo tee /sys/module/pcie_aspm/parameters/policy > /dev/null 2>&1
+    fi
+    
+    # Enable runtime PM for PCIe
+    echo 1 | sudo tee /sys/bus/pci/drivers_autoprobe > /dev/null 2>&1
+    
+    # Enable PCIe ASPM via kernel parameter (requires reboot)
+    if ! grep -q "pcie_aspm=powersave" /proc/cmdline 2>/dev/null; then
+        echo -e "${YELLOW}⚠ To enable ASPM permanently, add 'pcie_aspm=powersave' to kernel parameters${NC}"
+        echo -e "${CYAN}  Edit /etc/default/grub and add to GRUB_CMDLINE_LINUX_DEFAULT${NC}"
+    fi
+    
+    echo -e "${GREEN}✓ ASPM enabled${NC}"
+    log "ASPM enabled"
+}
+
+# Disable ASPM (for maximum performance)
+disable_aspm() {
+    if ! check_sudo; then
+        echo -e "${RED}✗ Sudo required for ASPM management${NC}"
+        return 1
+    fi
+    
+    echo -e "${CYAN}Disabling ASPM...${NC}"
+    
+    # Disable ASPM for PCIe devices
+    for pcie_dev in /sys/bus/pci/devices/*; do
+        if [ -f "$pcie_dev/power/control" ]; then
+            echo "on" | sudo tee "$pcie_dev/power/control" > /dev/null 2>&1
+        fi
+    done
+    
+    # Set PCIe ASPM policy to performance
+    if [ -f /sys/module/pcie_aspm/parameters/policy ]; then
+        echo "performance" | sudo tee /sys/module/pcie_aspm/parameters/policy > /dev/null 2>&1
+    fi
+    
+    echo -e "${GREEN}✓ ASPM disabled${NC}"
+    log "ASPM disabled"
+}
+
+# Get ASPM status
+get_aspm_status() {
+    echo -e "${BOLD}ASPM Status:${NC}"
+    if [ -f /sys/module/pcie_aspm/parameters/policy ]; then
+        local policy=$(cat /sys/module/pcie_aspm/parameters/policy 2>/dev/null)
+        echo -e "  Policy: ${CYAN}$policy${NC}"
+    else
+        echo -e "  ${YELLOW}⚠ ASPM module not loaded${NC}"
+    fi
+    
+    local auto_count=0
+    local on_count=0
+    for pcie_dev in /sys/bus/pci/devices/*; do
+        if [ -f "$pcie_dev/power/control" ]; then
+            local control=$(cat "$pcie_dev/power/control" 2>/dev/null)
+            [ "$control" = "auto" ] && ((auto_count++))
+            [ "$control" = "on" ] && ((on_count++))
+        fi
+    done
+    echo -e "  Devices on auto: ${CYAN}$auto_count${NC}"
+    echo -e "  Devices forced on: ${CYAN}$on_count${NC}"
+}
+
+# ============================================
+# INTELLIGENT CPU SCALING (Dynamic Load-Based)
+# ============================================
+
+# Monitor CPU load and adjust governor dynamically
+intelligent_cpu_scaling() {
+    local low_threshold=${1:-20}  # Switch to powersave below this %
+    local high_threshold=${2:-70}  # Switch to performance above this %
+    local check_interval=${3:-5}   # Check every N seconds
+    
+    echo -e "${CYAN}${BOLD}"
+    echo "╔════════════════════════════════════════╗"
+    echo "║    Intelligent CPU Scaling             ║"
+    echo "╚════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+    echo -e "${CYAN}Low threshold: ${low_threshold}%${NC}"
+    echo -e "${CYAN}High threshold: ${high_threshold}%${NC}"
+    echo -e "${YELLOW}Monitoring CPU load... (Press Ctrl+C to exit)${NC}"
+    echo ""
+    
+    # Save PID
+    echo $$ > "$LOG_DIR/intelligent_scaling.pid"
+    
+    local current_governor=""
+    
+    while true; do
+        # Get average CPU load
+        local cpu_load=$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1}')
+        cpu_load=${cpu_load%.*}  # Remove decimal
+        
+        # Get CPU temperature if available
+        local cpu_temp=0
+        if has_capability "sensors"; then
+            cpu_temp=$(sensors 2>/dev/null | grep -iE 'Package id 0|Tdie|Tctl' | awk '{print $2}' | sed 's/+//;s/°C//' | grep -oE '[0-9]+' | head -1)
+            cpu_temp=${cpu_temp:-0}
+        fi
+        
+        # Determine target governor
+        local target_governor=""
+        if [ "$cpu_load" -ge "$high_threshold" ] || [ "$cpu_temp" -gt 80 ]; then
+            target_governor="performance"
+        elif [ "$cpu_load" -le "$low_threshold" ] && [ "$cpu_temp" -lt 70 ]; then
+            target_governor="powersave"
+        else
+            target_governor="ondemand"
+        fi
+        
+        # Apply governor if changed
+        if [ "$current_governor" != "$target_governor" ]; then
+            apply_cpu_governor "$target_governor" 2>/dev/null
+            current_governor="$target_governor"
+            echo -e "${CYAN}[$(date '+%H:%M:%S')] CPU Load: ${cpu_load}%, Temp: ${cpu_temp}°C → Governor: ${target_governor}${NC}"
+        fi
+        
+        sleep "$check_interval"
+    done
+}
+
+# Start intelligent CPU scaling in background
+start_intelligent_scaling() {
+    local low_threshold=${1:-20}
+    local high_threshold=${2:-70}
+    local check_interval=${3:-5}
+    
+    if [ -f "$LOG_DIR/intelligent_scaling.pid" ]; then
+        local old_pid=$(cat "$LOG_DIR/intelligent_scaling.pid" 2>/dev/null)
+        if kill -0 "$old_pid" 2>/dev/null; then
+            echo -e "${YELLOW}⚠ Intelligent scaling already running (PID: $old_pid)${NC}"
+            return 1
+        fi
+    fi
+    
+    intelligent_cpu_scaling "$low_threshold" "$high_threshold" "$check_interval" &
+    echo -e "${GREEN}✓ Intelligent CPU scaling started${NC}"
+    log "Intelligent CPU scaling started (low: $low_threshold%, high: $high_threshold%)"
+}
+
+# Stop intelligent CPU scaling
+stop_intelligent_scaling() {
+    if [ -f "$LOG_DIR/intelligent_scaling.pid" ]; then
+        local pid=$(cat "$LOG_DIR/intelligent_scaling.pid" 2>/dev/null)
+        if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null
+            rm -f "$LOG_DIR/intelligent_scaling.pid"
+            echo -e "${GREEN}✓ Intelligent CPU scaling stopped${NC}"
+            log "Intelligent CPU scaling stopped"
+        else
+            echo -e "${YELLOW}⚠ Intelligent scaling not running${NC}"
+            rm -f "$LOG_DIR/intelligent_scaling.pid"
+        fi
+    else
+        echo -e "${YELLOW}⚠ Intelligent scaling not running${NC}"
+    fi
+}
+
+# ============================================
+# BATTERY CHARGE THRESHOLDS
+# ============================================
+
+# Set battery charge threshold (start/stop charging)
+set_battery_threshold() {
+    local start_threshold=${1:-}
+    local stop_threshold=${2:-}
+    
+    if ! check_sudo; then
+        echo -e "${RED}✗ Sudo required for battery threshold management${NC}"
+        return 1
+    fi
+    
+    # Find battery
+    local battery_path=""
+    if [ -d /sys/class/power_supply ]; then
+        for supply in /sys/class/power_supply/BAT*; do
+            if [ -d "$supply" ]; then
+                battery_path="$supply"
+                break
+            fi
+        done
+    fi
+    
+    if [ -z "$battery_path" ]; then
+        echo -e "${RED}✗ Battery not found${NC}"
+        return 1
+    fi
+    
+    # Check if thresholds are supported
+    if [ ! -f "$battery_path/charge_start_threshold" ] || [ ! -f "$battery_path/charge_stop_threshold" ]; then
+        echo -e "${YELLOW}⚠ This system doesn't support charge thresholds${NC}"
+        echo -e "${CYAN}  Try installing 'tlp' or 'acpi_call' module${NC}"
+        return 1
+    fi
+    
+    # Set thresholds
+    if [ -n "$start_threshold" ]; then
+        if [ "$start_threshold" -ge 0 ] && [ "$start_threshold" -le 100 ]; then
+            echo "$start_threshold" | sudo tee "$battery_path/charge_start_threshold" > /dev/null 2>&1
+            if [ $? -eq 0 ]; then
+                echo -e "${GREEN}✓ Start threshold set to ${start_threshold}%${NC}"
+                log "Battery start threshold set to $start_threshold%"
+            else
+                echo -e "${RED}✗ Failed to set start threshold${NC}"
+            fi
+        else
+            echo -e "${RED}✗ Start threshold must be between 0-100${NC}"
+        fi
+    fi
+    
+    if [ -n "$stop_threshold" ]; then
+        if [ "$stop_threshold" -ge 0 ] && [ "$stop_threshold" -le 100 ]; then
+            echo "$stop_threshold" | sudo tee "$battery_path/charge_stop_threshold" > /dev/null 2>&1
+            if [ $? -eq 0 ]; then
+                echo -e "${GREEN}✓ Stop threshold set to ${stop_threshold}%${NC}"
+                log "Battery stop threshold set to $stop_threshold%"
+            else
+                echo -e "${RED}✗ Failed to set stop threshold${NC}"
+            fi
+        else
+            echo -e "${RED}✗ Stop threshold must be between 0-100${NC}"
+        fi
+    fi
+    
+    # Show current thresholds
+    get_battery_threshold
+}
+
+# Get current battery thresholds
+get_battery_threshold() {
+    local battery_path=""
+    if [ -d /sys/class/power_supply ]; then
+        for supply in /sys/class/power_supply/BAT*; do
+            if [ -d "$supply" ]; then
+                battery_path="$supply"
+                break
+            fi
+        done
+    fi
+    
+    if [ -z "$battery_path" ]; then
+        echo -e "${YELLOW}⚠ Battery not found${NC}"
+        return 1
+    fi
+    
+    echo -e "${BOLD}Battery Charge Thresholds:${NC}"
+    
+    if [ -f "$battery_path/charge_start_threshold" ]; then
+        local start=$(cat "$battery_path/charge_start_threshold" 2>/dev/null)
+        echo -e "  Start charging at: ${CYAN}${start}%${NC}"
+    else
+        echo -e "  Start threshold: ${YELLOW}Not supported${NC}"
+    fi
+    
+    if [ -f "$battery_path/charge_stop_threshold" ]; then
+        local stop=$(cat "$battery_path/charge_stop_threshold" 2>/dev/null)
+        echo -e "  Stop charging at: ${CYAN}${stop}%${NC}"
+    else
+        echo -e "  Stop threshold: ${YELLOW}Not supported${NC}"
+    fi
+    
+    # Show current battery level
+    if [ -f "$battery_path/capacity" ]; then
+        local capacity=$(cat "$battery_path/capacity" 2>/dev/null)
+        local status=$(cat "$battery_path/status" 2>/dev/null)
+        echo -e "  Current level: ${CYAN}${capacity}%${NC} (${status})"
+    fi
 }
 
 # ============================================
@@ -3000,6 +3492,11 @@ interactive_dashboard() {
         echo -e "${BOLD}10.${NC} Schedule Mode"
         echo -e "${BOLD}11.${NC} Mods & Plugins"
         echo -e "${BOLD}12.${NC} Security & Privacy"
+        echo -e "${BOLD}13.${NC} Auto Charger Detection"
+        echo -e "${BOLD}14.${NC} Intelligent CPU Scaling"
+        echo -e "${BOLD}15.${NC} ASPM Management"
+        echo -e "${BOLD}16.${NC} Battery Thresholds"
+        echo -e "${BOLD}17.${NC} Enhanced Temperature Monitor"
         echo -e "${BOLD}0.${NC} Exit"
         echo ""
         read -p "Select option: " choice
@@ -3034,6 +3531,57 @@ interactive_dashboard() {
                 show_security
                 show_privacy
                 read -p "Press Enter to continue..."
+                ;;
+            13)
+                echo -e "${CYAN}Auto Charger Detection${NC}"
+                read -p "Start charger monitor? (y/n): " start_charger
+                if [ "$start_charger" = "y" ]; then
+                    read -p "AC mode (default: PERFORMANCE): " ac_mode
+                    read -p "Battery mode (default: POWERSAVE): " bat_mode
+                    start_auto_charger "${ac_mode:-PERFORMANCE}" "${bat_mode:-POWERSAVE}"
+                else
+                    stop_auto_charger
+                fi
+                read -p "Press Enter to continue..."
+                ;;
+            14)
+                echo -e "${CYAN}Intelligent CPU Scaling${NC}"
+                read -p "Start intelligent scaling? (y/n): " start_scaling
+                if [ "$start_scaling" = "y" ]; then
+                    read -p "Low threshold % (default: 20): " low_thresh
+                    read -p "High threshold % (default: 70): " high_thresh
+                    read -p "Check interval seconds (default: 5): " interval
+                    start_intelligent_scaling "${low_thresh:-20}" "${high_thresh:-70}" "${interval:-5}"
+                else
+                    stop_intelligent_scaling
+                fi
+                read -p "Press Enter to continue..."
+                ;;
+            15)
+                echo -e "${CYAN}ASPM Management${NC}"
+                get_aspm_status
+                echo ""
+                read -p "Enable (e) or Disable (d) ASPM? (e/d/n): " aspm_action
+                case "$aspm_action" in
+                    e) enable_aspm ;;
+                    d) disable_aspm ;;
+                esac
+                read -p "Press Enter to continue..."
+                ;;
+            16)
+                get_battery_threshold
+                echo ""
+                read -p "Set thresholds? (y/n): " set_thresh
+                if [ "$set_thresh" = "y" ]; then
+                    read -p "Start charging at % (0-100): " start_thresh
+                    read -p "Stop charging at % (0-100): " stop_thresh
+                    set_battery_threshold "$start_thresh" "$stop_thresh"
+                fi
+                read -p "Press Enter to continue..."
+                ;;
+            17)
+                read -p "Temperature threshold (default: 80°C): " temp_thresh
+                temp_monitor "${temp_thresh:-80}"
                 ;;
             0) echo -e "${GREEN}Goodbye!${NC}"; exit 0; ;;
             *) echo -e "${RED}Invalid option${NC}"; sleep 1; ;;
@@ -3079,12 +3627,18 @@ show_help() {
     echo -e "${BOLD}Monitoring & Health:${NC}"
     echo "  health                 Run comprehensive system health check"
     echo "  monitor [refresh]      Real-time monitoring dashboard (default: 2s)"
-    echo "  temp [threshold]       Monitor temperature with alerts (default: 80°C)"
+    echo "  temp [threshold]       Enhanced temperature monitoring (CPU, GPU, NVMe) (default: 80°C)"
     echo ""
     echo -e "${BOLD}Automation:${NC}"
     echo "  automode [start|stop|status] Intelligent activity detection & auto-mode"
+    echo "  charger [start|stop] [ac_mode] [battery_mode] Automatic charger detection & mode switching"
+    echo "  scaling [start|stop] [low] [high] [interval] Intelligent CPU scaling based on load"
     echo "  schedule <time> <mode> Schedule mode activation (HH:MM format)"
     echo "  schedule-list          List scheduled modes"
+    echo ""
+    echo -e "${BOLD}Power Management:${NC}"
+    echo "  aspm [enable|disable|status] ASPM & PCIe link power management"
+    echo "  battery [threshold] [start] [stop] Battery charge threshold management"
     echo ""
     echo -e "${BOLD}Process Management:${NC}"
     echo "  process [list|kill|priority] [target] Manage processes"
@@ -3107,6 +3661,11 @@ show_help() {
     echo "  archmode profile GAMER"
     echo "  archmode automode start     # Start intelligent auto-detection"
     echo "  archmode automode status    # Check automode status"
+    echo "  archmode charger start PERFORMANCE POWERSAVE  # Auto-switch on AC/battery"
+    echo "  archmode scaling start 20 70 5  # Intelligent CPU scaling (low 20%, high 70%, check every 5s)"
+    echo "  archmode aspm enable        # Enable ASPM for power saving"
+    echo "  archmode battery threshold 60 80  # Set battery charge thresholds (start 60%, stop 80%)"
+    echo "  archmode temp 85           # Monitor temperatures with 85°C threshold"
     echo "  archmode create-mod mymod"
     echo "  archmode create-plugin myplugin"
     echo "  archmode edit-mod mymod vim"
@@ -3124,6 +3683,8 @@ show_help() {
 command=$(echo "${1:-dashboard}" | tr '[:upper:]' '[:lower:]')
 argument="${2:-}"
 argument2="${3:-}"
+argument3="${4:-}"
+argument4="${5:-}"
 
 case "$command" in
     status)
@@ -3215,6 +3776,65 @@ case "$command" in
         ;;
     optimize)
         system_optimizer
+        ;;
+    charger)
+        case "$argument" in
+            start)
+                start_auto_charger "$argument2" "${argument3:-POWERSAVE}"
+                ;;
+            stop)
+                stop_auto_charger
+                ;;
+            *)
+                echo -e "${RED}✗ Usage: archmode charger [start|stop] [ac_mode] [battery_mode]${NC}"
+                exit 1
+                ;;
+        esac
+        ;;
+    aspm)
+        case "$argument" in
+            enable)
+                enable_aspm
+                ;;
+            disable)
+                disable_aspm
+                ;;
+            status)
+                get_aspm_status
+                ;;
+            *)
+                echo -e "${RED}✗ Usage: archmode aspm [enable|disable|status]${NC}"
+                exit 1
+                ;;
+        esac
+        ;;
+    scaling)
+        case "$argument" in
+            start)
+                start_intelligent_scaling "$argument2" "$argument3" "${argument4:-5}"
+                ;;
+            stop)
+                stop_intelligent_scaling
+                ;;
+            *)
+                echo -e "${RED}✗ Usage: archmode scaling [start|stop] [low_threshold] [high_threshold] [interval]${NC}"
+                exit 1
+                ;;
+        esac
+        ;;
+    battery)
+        case "$argument" in
+            threshold|thresh)
+                if [ -z "$argument2" ] && [ -z "$argument3" ]; then
+                    get_battery_threshold
+                else
+                    set_battery_threshold "$argument2" "$argument3"
+                fi
+                ;;
+            *)
+                get_battery_threshold
+                ;;
+        esac
         ;;
     dashboard)
         interactive_dashboard
