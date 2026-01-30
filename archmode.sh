@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # ArchMode - System Mode Manager for Arch Linux
-# Version: 6.0.0 - ULTIMATE EDITION
-# THE BEST SYSTEM MANAGEMENT TOOL - Complete System Control
-# With Mods, Plugins, Security, Privacy, Monitoring, Automation & More!
+# Version: 7.0.0
+# System Mode Manager for Arch Linux
+# With Mods, Plugins, Security, Privacy, Monitoring, Automation & More
 #
 # Features:
 # - System Mode Management (Gaming, Productivity, Power Save, etc.)
@@ -57,7 +57,7 @@ HEALTH_FILE="$LOG_DIR/health_report.txt"
 TEMP_ALERT_FILE="$CONFIG_DIR/temp_alerts.conf"
 AUTOMODE_FILE="$CONFIG_DIR/automode.conf"
 AUTOMODE_PID_FILE="$LOG_DIR/automode.pid"
-VERSION="6.0.0"
+VERSION="7.0.0"
 
 # Performance: Cache state in memory
 declare -A STATE_CACHE
@@ -73,6 +73,34 @@ SUDO_CHECKED=false
 
 # Create directories
 mkdir -p "$CONFIG_DIR" "$LOG_DIR" "$BACKUP_DIR" "$MODS_DIR" "$PLUGINS_DIR"
+
+# Clean up old reports (older than 30 days)
+cleanup_old_reports() {
+    local report_dir="$LOG_DIR"
+    local days_old=30
+    local deleted_count=0
+    
+    if [ -d "$report_dir" ]; then
+        # Find and delete reports older than 30 days
+        while IFS= read -r -d '' report_file; do
+            if [ -f "$report_file" ]; then
+                rm -f "$report_file" 2>/dev/null && ((deleted_count++)) || true
+            fi
+        done < <(find "$report_dir" -maxdepth 1 -type f -name "*report*.txt" -mtime +$days_old -print0 2>/dev/null)
+        
+        # Also clean up update logs older than 30 days
+        while IFS= read -r -d '' log_file; do
+            if [ -f "$log_file" ]; then
+                rm -f "$log_file" 2>/dev/null && ((deleted_count++)) || true
+            fi
+        done < <(find "$report_dir" -maxdepth 1 -type f -name "update_*.log" -mtime +$days_old -print0 2>/dev/null)
+        
+        [ "$deleted_count" -gt 0 ] && debug_log "Cleaned up $deleted_count old report(s) (>${days_old} days)" || true
+    fi
+}
+
+# Run cleanup on startup
+cleanup_old_reports
 
 # Initialize additional config files
 [ ! -f "$SCHEDULE_FILE" ] && touch "$SCHEDULE_FILE"
@@ -101,7 +129,7 @@ DEVMODE:Development Mode:Work:Unlimited resources for compilation and testing
 NIGHTMODE:Night Mode:Comfort:Reduce blue light, dim screen, quiet mode
 TRAVELMODE:Travel Mode:Battery:Maximum battery life for on-the-go
 RENDERMODE:Render Mode:Performance:Max CPU/GPU for 3D rendering and video encoding
-ULTIMATE:Ultimate Performance:Performance:Maximum system performance - all optimizations enabled
+PERFORMANCE:Maximum Performance:Performance:Maximum system performance - all optimizations enabled
 EOF
 fi
 
@@ -1489,11 +1517,11 @@ enable_rendermode() {
     fi
 }
 
-enable_ultimatemode() {
-    local current=$(get_state "ULTIMATE")
+enable_performance_mode() {
+    local current=$(get_state "PERFORMANCE")
     
     if [ "$current" = "true" ]; then
-        echo -e "${YELLOW}➜ Disabling Ultimate Performance Mode...${NC}"
+        echo -e "${YELLOW}➜ Disabling Maximum Performance Mode...${NC}"
         
         # Restore all settings
         has_capability "dunst" && systemctl --user start dunst 2>/dev/null || true
@@ -1506,10 +1534,10 @@ enable_ultimatemode() {
             systemctl is-enabled thermald &>/dev/null && sudo systemctl start thermald 2>/dev/null || true
         fi
         
-        set_state "ULTIMATE" "false"
-        echo -e "${GREEN}✓ Ultimate Performance Mode disabled${NC}"
+        set_state "PERFORMANCE" "false"
+        echo -e "${GREEN}✓ Maximum Performance Mode disabled${NC}"
     else
-        echo -e "${CYAN}${BOLD}➜ Enabling ULTIMATE Performance Mode...${NC}"
+        echo -e "${CYAN}${BOLD}➜ Enabling Maximum Performance Mode...${NC}"
         echo -e "${YELLOW}  This enables ALL performance optimizations!${NC}"
         echo ""
         
@@ -1534,16 +1562,16 @@ enable_ultimatemode() {
         # Advanced IRQ balancing
         optimize_irq_balancing
         
-        # Ultimate I/O optimization (none for absolute lowest latency)
+        # Maximum I/O optimization (none for absolute lowest latency)
         apply_io_scheduler "none"
         
-        # Ultimate memory optimization
+        # Maximum memory optimization
         optimize_memory "performance"
         
-        # Ultimate network optimization
+        # Maximum network optimization
         optimize_network "performance"
         
-        # Ultimate scheduler tuning
+        # Maximum scheduler tuning
         apply_sysctl \
             "kernel.sched_latency_ns=3000000" \
             "kernel.sched_min_granularity_ns=400000" \
@@ -1570,8 +1598,8 @@ enable_ultimatemode() {
             done
         fi
         
-        set_state "ULTIMATE" "true"
-        echo -e "${GREEN}✓${NC} ${BOLD}ULTIMATE Performance Mode enabled!${NC}"
+        set_state "PERFORMANCE" "true"
+        echo -e "${GREEN}✓${NC} ${BOLD}Maximum Performance Mode enabled!${NC}"
         echo -e "${CYAN}  • CPU: Maximum performance with boost enabled${NC}"
         echo -e "${CYAN}  • CPU: Locked to maximum frequency${NC}"
         echo -e "${CYAN}  • I/O: Optimized for lowest latency${NC}"
@@ -1683,7 +1711,7 @@ apply_profile() {
             NIGHTMODE) enable_nightmode ;;
             TRAVELMODE) enable_travelmode ;;
             RENDERMODE) enable_rendermode ;;
-            ULTIMATE) enable_ultimatemode ;;
+            PERFORMANCE) enable_performance_mode ;;
         esac
     done
     
@@ -1801,7 +1829,7 @@ reset_all() {
     echo -e "${GREEN}✓ All modes have been reset to defaults${NC}"
 }
 
-# Update ArchMode from GitHub - ULTIMATE UPDATE SYSTEM
+# Update ArchMode from GitHub
 update_archmode() {
     local GITHUB_REPO="https://github.com/theofficalnoodles/ArchMode"
     local INSTALLED_SCRIPT="/usr/local/bin/archmode"
@@ -1811,7 +1839,7 @@ update_archmode() {
     
     echo -e "${CYAN}${BOLD}"
     echo "╔════════════════════════════════════════╗"
-    echo "║    ArchMode ULTIMATE Update System     ║"
+    echo "║    ArchMode Update System              ║"
     echo "╚════════════════════════════════════════╝"
     echo -e "${NC}"
     echo ""
@@ -2376,7 +2404,7 @@ system_health_check() {
         done
     fi
     
-    # Save report
+    # Save report with timestamp
     {
         echo "System Health Report - $(date)"
         echo "Health Score: $health_score/100"
@@ -2388,8 +2416,12 @@ system_health_check() {
         printf '%s\n' "${warnings[@]}"
     } > "$HEALTH_FILE"
     
+    # Clean up old reports after saving new one
+    cleanup_old_reports
+    
     echo ""
     echo -e "${CYAN}Report saved to: $HEALTH_FILE${NC}"
+    echo -e "${CYAN}Note: Reports older than 30 days are automatically deleted${NC}"
     log "System health check completed - Score: $health_score/100"
 }
 
@@ -2532,7 +2564,7 @@ schedule_run() {
                 NIGHTMODE) enable_nightmode ;;
                 TRAVELMODE) enable_travelmode ;;
                 RENDERMODE) enable_rendermode ;;
-                ULTIMATE) enable_ultimatemode ;;
+                PERFORMANCE) enable_performance_mode ;;
             esac
         fi
     done < "$SCHEDULE_FILE"
@@ -3716,7 +3748,7 @@ interactive_dashboard() {
 # Help / usage
 show_help() {
     echo -e "${CYAN}${BOLD}"
-    echo "ArchMode v$VERSION - ULTIMATE EDITION"
+    echo "ArchMode v$VERSION"
     echo "System Mode Manager for Arch Linux"
     echo -e "${NC}"
     echo "Usage: archmode <command> [argument]"
@@ -3837,7 +3869,7 @@ case "$command" in
             NIGHTMODE) enable_nightmode ;;
             TRAVELMODE) enable_travelmode ;;
             RENDERMODE) enable_rendermode ;;
-            ULTIMATE) enable_ultimatemode ;;
+            PERFORMANCE) enable_performance_mode ;;
             *)
                 echo -e "${RED}✗ Unknown mode: $argument${NC}"
                 echo "Use: archmode modes"
