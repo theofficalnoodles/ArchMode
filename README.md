@@ -344,7 +344,7 @@ sudo pacman -S git
 To completely remove ArchMode from your system:
 
 ```bash
-archmode unistall
+archmode uninstall
 ```
 ## OR
 ```bash
