@@ -1,4 +1,4 @@
-# ArchMode 🎮
+# ArchMode 
 <img width="400" height="400" alt="image" src="https://github.com/user-attachments/assets/9d45cea5-e6ff-4641-8564-5b1b32de110c" />
 
 
@@ -6,15 +6,15 @@ A powerful system mode manager for Arch Linux that lets you toggle system servic
 
 ## Features
 
-* **🎮 GameMode** - Optimize for gaming: disable notifications, maximize CPU performance
-* **💼 Productivity Mode** - Stay focused: enable notifications, prevent sleep
-* **⚡ Power Save Mode** - Reduce consumption: lower CPU frequency, dim screen
-* **🔇 Quiet Mode** - Reduce noise: control fan speed, reduce volume
-* **👨‍💻 Dev Mode** - Development tweaks: disable updates, enable debug logging
-* **💾 Persistent State** - Modes are saved and restored across reboots
-* **📊 Detailed Logging** - Track all changes in the log file
-* **🖥️ Interactive & CLI** - Use the menu or command line interface
-* **🔄 Auto-Update** - Update with a single command
+* ** GameMode** - Optimize for gaming: disable notifications, maximize CPU performance
+* ** Productivity Mode** - Stay focused: enable notifications, prevent sleep
+* ** Power Save Mode** - Reduce consumption: lower CPU frequency, dim screen
+* ** Quiet Mode** - Reduce noise: control fan speed, reduce volume
+* ** Dev Mode** - Development tweaks: disable updates, enable debug logging
+* ** Persistent State** - Modes are saved and restored across reboots
+* ** Detailed Logging** - Track all changes in the log file
+* ** Interactive & CLI** - Use the menu or command line interface
+* ** Auto-Update** - Update with a single command
 
 ## Installation
 
